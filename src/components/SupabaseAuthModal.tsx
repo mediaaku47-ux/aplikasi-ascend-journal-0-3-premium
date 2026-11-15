@@ -78,6 +78,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState(userProfile.name || '');
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -112,6 +113,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       setErrorMessage(null);
       setSuccessMessage(null);
       setMigrationResult(null);
+      setAgreedToTerms(false);
       const cfg = getSupabaseConfig();
       setConfigUrl(cfg.url || '');
       setConfigAnonKey(cfg.anonKey || '');
@@ -187,6 +189,11 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     if (!isConfigured) {
       setErrorMessage('Konfigurasi Supabase URL & Anon Key belum diatur. Silakan isi di tab Konfigurasi terlebih dahulu.');
       setActiveTab('config');
+      return;
+    }
+
+    if (!agreedToTerms) {
+      setErrorMessage('Anda wajib mencentang persetujuan larangan berbagi akses akun terlebih dahulu.');
       return;
     }
 
@@ -621,10 +628,47 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               </div>
             </div>
 
+            <label
+              htmlFor="checkbox-supabase-register-agreement"
+              className={`flex items-start gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer select-none ${
+                agreedToTerms
+                  ? 'bg-teal-500/15 border-teal-400/45'
+                  : 'bg-amber-500/10 border-amber-400/35 hover:border-amber-400/55'
+              }`}
+            >
+              <div className="relative flex items-center justify-center mt-0.5 shrink-0">
+                <input
+                  id="checkbox-supabase-register-agreement"
+                  type="checkbox"
+                  checked={agreedToTerms}
+                  onChange={(e) => {
+                    setAgreedToTerms(e.target.checked);
+                    if (e.target.checked && errorMessage?.includes('persetujuan')) {
+                      setErrorMessage(null);
+                    }
+                  }}
+                  className="peer sr-only"
+                />
+                <div
+                  className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-teal-400/50 ${
+                    agreedToTerms
+                      ? 'bg-teal-500 border-teal-400 text-white shadow-xs'
+                      : 'bg-white/5 border-amber-400/70 text-transparent hover:border-teal-400/70'
+                  }`}
+                >
+                  <Check className="w-3 h-3 stroke-[3]" />
+                </div>
+              </div>
+              <span className="text-[11.5px] leading-relaxed text-white/85">
+                ⚠️ Saya menyatakan setuju bahwa dilarang keras menyebarluaskan link, membagikan akses akun, atau menggunakan satu akun secara bersama-sama dengan orang lain. Akun yang terdeteksi melanggar akan diblokir secara permanen.
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 hover:from-teal-600 hover:via-sky-600 hover:to-indigo-600 text-white font-bold text-xs shadow-lg shadow-teal-500/25 cursor-pointer flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              disabled={isLoading || !agreedToTerms}
+              title={!agreedToTerms ? 'Centang kotak persetujuan terlebih dahulu untuk mendaftar' : undefined}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 hover:from-teal-600 hover:via-sky-600 hover:to-indigo-600 text-white font-bold text-xs shadow-lg shadow-teal-500/25 cursor-pointer flex items-center justify-center gap-2 transition-all disabled:opacity-45 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>

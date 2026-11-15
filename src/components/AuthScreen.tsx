@@ -46,6 +46,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   });
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [rememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -97,6 +98,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
       if (password !== confirmPassword) {
         setErrorMessage('Konfirmasi kata sandi tidak cocok.');
+        return false;
+      }
+
+      if (!agreedToTerms) {
+        setErrorMessage('Anda wajib mencentang persetujuan larangan berbagi akses akun terlebih dahulu.');
         return false;
       }
     }
@@ -531,12 +537,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     </div>
                   )}
 
+                  {/* Register: Persetujuan & Peringatan Anti-Berbagi Akun */}
+                  {mode === 'register' && (
+                    <div className="pt-1">
+                      <label
+                        htmlFor="checkbox-register-agreement"
+                        className={`flex items-start gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer select-none ${
+                          agreedToTerms
+                            ? 'bg-red-50/95 border-red-300 ring-1 ring-red-500/15'
+                            : 'bg-red-50/85 border-red-200/90 hover:border-red-300'
+                        }`}
+                      >
+                        <div className="relative flex items-center justify-center mt-0.5 shrink-0">
+                          <input
+                            id="checkbox-register-agreement"
+                            type="checkbox"
+                            checked={agreedToTerms}
+                            onChange={(e) => {
+                              setAgreedToTerms(e.target.checked);
+                              if (e.target.checked && errorMessage?.includes('persetujuan')) {
+                                setErrorMessage(null);
+                              }
+                            }}
+                            className="peer sr-only"
+                          />
+                          <div
+                            className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-red-500/40 ${
+                              agreedToTerms
+                                ? 'bg-red-600 border-red-600 text-white shadow-xs'
+                                : 'bg-white border-red-400/90 text-transparent hover:border-red-600/70'
+                            }`}
+                          >
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </div>
+                        </div>
+                        <span className="text-[11.5px] sm:text-xs leading-relaxed text-red-900/90 font-['Plus_Jakarta_Sans',sans-serif]">
+                          <span className="block font-bold text-red-700 mb-0.5">
+                            ⚠️ Pemberitahuan Keamanan
+                          </span>
+                          Aplikasi ini terikat secara eksklusif dengan akun pribadi Anda. Tautan atau link app dan akses masuk tidak untuk disebarluaskan. Jaga kerahasiaan akun Anda demi kenyamanan akun anda.
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
                   {/* Primary Solid Emerald CTA Button with Soft Shadow */}
                   <button
                     type="submit"
                     id="btn-auth-submit"
-                    disabled={loading}
-                    className="w-full py-3.5 px-6 rounded-2xl bg-[#003B2F] hover:bg-[#004D3D] active:scale-[0.98] text-white font-bold text-xs sm:text-sm tracking-wide uppercase flex items-center justify-center gap-2 transition-all cursor-pointer mt-5 shadow-[0_8px_24px_rgba(0,59,47,0.28)] hover:shadow-[0_12px_28px_rgba(0,59,47,0.38)] disabled:opacity-60 disabled:cursor-not-allowed select-none"
+                    disabled={loading || (mode === 'register' && !agreedToTerms)}
+                    title={mode === 'register' && !agreedToTerms ? 'Centang kotak persetujuan terlebih dahulu untuk mendaftar' : undefined}
+                    className="w-full py-3.5 px-6 rounded-2xl bg-[#003B2F] hover:bg-[#004D3D] active:scale-[0.98] text-white font-bold text-xs sm:text-sm tracking-wide uppercase flex items-center justify-center gap-2 transition-all cursor-pointer mt-5 shadow-[0_8px_24px_rgba(0,59,47,0.28)] hover:shadow-[0_12px_28px_rgba(0,59,47,0.38)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#003B2F] disabled:active:scale-100 disabled:shadow-none select-none"
                   >
                     {loading ? (
                       <>
@@ -559,6 +610,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     id="btn-switch-auth-mode"
                     onClick={() => {
                       setMode(mode === 'login' ? 'register' : 'login');
+                      setAgreedToTerms(false);
                       setErrorMessage(null);
                       setSuccessMessage(null);
                     }}
