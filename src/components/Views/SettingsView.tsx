@@ -11,7 +11,8 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCcw,
-  Star
+  Star,
+  ShieldAlert
 } from 'lucide-react';
 import { MONTH_NAMES_ID, getDaysInMonth, getYearOptions } from '../../utils/dateUtils';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
@@ -708,6 +709,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </AccordionSection>
         )}
+
+        {/* PEMBERITAHUAN KEAMANAN KHUSUS */}
+        <AccordionSection
+          id="security-notice"
+          isOpen={openSection === 'security-notice'}
+          onToggle={() => toggleSection('security-notice')}
+          icon={<ShieldAlert className="w-4 h-4" />}
+          iconColorClass={isLight ? 'bg-red-100 text-red-600' : 'bg-red-500/20 text-red-400'}
+          title="Pemberitahuan Keamanan"
+          badge={
+            <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-bold ${
+              isLight ? 'bg-red-100 border-red-300 text-red-700' : 'bg-red-500/20 border-red-500/35 text-red-300'
+            }`}>
+              Penting
+            </span>
+          }
+          isLight={isLight}
+        >
+          <div className={`p-4 rounded-2xl border space-y-2 ${
+            isLight
+              ? 'bg-red-50/90 border-red-200 text-red-900'
+              : 'bg-red-500/10 border-red-500/30 text-red-100'
+          }`}>
+            <div className={`flex items-center gap-2 text-xs sm:text-sm font-bold ${
+              isLight ? 'text-red-700' : 'text-red-300'
+            }`}>
+              <span>⚠️ Pemberitahuan Keamanan</span>
+            </div>
+            <p className={`text-xs leading-relaxed ${
+              isLight ? 'text-red-900/90' : 'text-red-100/90'
+            }`}>
+              Aplikasi ini terikat secara eksklusif dengan akun pribadi Anda. Tautan atau link app dan masuk tidak untuk disebarluaskan akseskan. Jaga akun pribadi Anda demi kenyamanan akun Anda. akun anda akan diblokir apabila Anda menyebarluaskan link.
+            </p>
+          </div>
+        </AccordionSection>
 
         {/* 6. RESET DATA */}
         <AccordionSection
