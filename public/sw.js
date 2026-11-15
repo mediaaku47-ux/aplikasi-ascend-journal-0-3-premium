@@ -1,5 +1,5 @@
 // Ascend Journal Service Worker for Progressive Web App (PWA)
-const CACHE_NAME = 'ascend-journal-pwa-v26';
+const CACHE_NAME = 'ascend-journal-pwa-v27';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',

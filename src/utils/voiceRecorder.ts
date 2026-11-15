@@ -6,6 +6,7 @@
 
 export interface VoiceRecordingResult {
   transcript: string;
+  rawTranscript: string;
   audioUrl?: string;
   duration: number; // Dalam detik
 }
@@ -16,6 +17,11 @@ export interface VoiceRecorderState {
   transcript: string;
   permissionStatus: 'idle' | 'requesting' | 'granted' | 'denied' | 'unsupported';
   errorMessage: string | null;
+}
+
+export function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 // Deteksi dukungan browser
@@ -133,13 +139,12 @@ export class VoiceRecorderController {
     // 2. Inisialisasi MediaRecorder untuk merekam suara asli
     try {
       let mimeType = '';
-      const candidateTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/mp4',
-        'audio/ogg;codecs=opus',
-        'audio/aac',
-      ];
+      const isIOS =
+        typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const candidateTypes = isIOS
+        ? ['audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm']
+        : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/aac'];
+
       for (const type of candidateTypes) {
         if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
           mimeType = type;
@@ -162,8 +167,10 @@ export class VoiceRecorderController {
       // Lanjutkan jika speech recognition masih bisa
     }
 
-    // 3. Inisialisasi Speech Recognition untuk transkripsi kata-kata secara instan
-    if (isSpeechRecognitionSupported()) {
+    // 3. Inisialisasi Speech Recognition untuk transkripsi real-time (Desktop/Laptop).
+    // Pada HP (Android/iOS), menghindari akses ganda ke mikrofon menjaga hasil rekaman MediaRecorder tetap jernih
+    // dan transkripsi otomatis diproses melalui endpoint AI saat selesai merekam.
+    if (!isMobileDevice() && isSpeechRecognitionSupported()) {
       try {
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         this.speechRecognition = new SpeechRecognition();
@@ -260,6 +267,13 @@ export class VoiceRecorderController {
         if (!this.mediaRecorder) return resolve();
         this.mediaRecorder.onstop = () => resolve();
         try {
+          if (typeof this.mediaRecorder.requestData === 'function') {
+            this.mediaRecorder.requestData();
+          }
+        } catch {
+          // Ignore requestData error
+        }
+        try {
           this.mediaRecorder.stop();
         } catch {
           resolve();
@@ -267,12 +281,15 @@ export class VoiceRecorderController {
       });
     }
 
-    // Konversi audio chunks menjadi data URL
+    // Konversi audio chunks menjadi data URL dengan MIME type akurat
     if (this.audioChunks.length > 0) {
       try {
-        const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
+        const chunkMime = this.audioChunks.find((c) => c.type)?.type;
+        const mimeType = chunkMime || this.mediaRecorder?.mimeType || 'audio/webm';
         const audioBlob = new Blob(this.audioChunks, { type: mimeType });
-        audioUrl = await blobToDataUrl(audioBlob);
+        if (audioBlob.size > 0) {
+          audioUrl = await blobToDataUrl(audioBlob);
+        }
       } catch (e) {
         console.warn('[VoiceRecorder] Gagal mengonversi blob audio:', e);
       }
@@ -289,13 +306,12 @@ export class VoiceRecorderController {
       duration: finalDuration,
     });
 
-    let finalText = this.currentTranscript.trim();
-    if (!finalText) {
-      finalText = `[Catatan Suara] Rekaman suara instan (${formatAudioDuration(finalDuration)})`;
-    }
+    const rawTranscript = this.currentTranscript.trim();
+    const finalText = rawTranscript || `[Catatan Suara] Rekaman suara instan (${formatAudioDuration(finalDuration)})`;
 
     return {
       transcript: finalText,
+      rawTranscript,
       audioUrl,
       duration: finalDuration,
     };
@@ -368,4 +384,36 @@ export function formatAudioDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * Transkripsikan rekaman audio via endpoint AI server (/api/transcribe-audio)
+ * Digunakan otomatis saat browser HP/mobile tidak mengisi transkripsi Web Speech API secara langsung.
+ */
+export async function transcribeAudioWithAI(audioDataUrl: string): Promise<string> {
+  if (!audioDataUrl || !audioDataUrl.startsWith('data:audio')) return '';
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const response = await fetch('/api/transcribe-audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({ audio: audioDataUrl }),
+    });
+
+    if (!response.ok) return '';
+    const json = await response.json().catch(() => null);
+    if (json?.success && typeof json.transcript === 'string') {
+      return json.transcript.trim();
+    }
+    return '';
+  } catch (err) {
+    console.warn('[VoiceRecorder] Fallback AI transcription failed:', err);
+    return '';
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }

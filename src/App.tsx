@@ -8,6 +8,7 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { UserProfile } from './types';
 import { CheckCircle2 } from 'lucide-react';
 import { usePWAInstall } from './hooks/usePWAInstall';
+import { requestInitialDevicePermissions } from './utils/notifications';
 
 const getFallbackDefaultUser = (): SupabaseUser => {
   let createdAt = '';
@@ -202,6 +203,7 @@ export default function App() {
         try {
           localStorage.setItem('journalstream_has_completed_welcome', 'true');
         } catch {}
+        void requestInitialDevicePermissions();
         const msg = welcomeText || pendingWelcomeToast;
         if (msg) {
           setPendingWelcomeToast(null);
@@ -272,6 +274,7 @@ export default function App() {
       try {
         localStorage.removeItem('journalstream_current_user');
         localStorage.removeItem('journalstream_has_completed_welcome');
+        localStorage.removeItem('ascend_initial_permissions_prompted');
       } catch {}
       showToast('Berhasil keluar dari akun. Sampai jumpa kembali!');
     }

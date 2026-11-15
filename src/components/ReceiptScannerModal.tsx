@@ -52,6 +52,11 @@ const CATEGORIES = [
  * Kompres gambar struk di sisi klien sebelum dikirim ke /api/scan-receipt
  * agar foto kamera HP beresolusi tinggi (8-20MB) mengecil menjadi ~200-450KB tanpa mengurangi ketajaman teks struk.
  */
+function extractMimeTypeFromDataUrl(dataUrl: string, fallback = 'image/jpeg'): string {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+  return match?.[1] || fallback;
+}
+
 async function compressReceiptDataUrl(dataUrl: string, maxDimension = 1600, quality = 0.85): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -70,6 +75,8 @@ async function compressReceiptDataUrl(dataUrl: string, maxDimension = 1600, qual
         resolve(dataUrl);
         return;
       }
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
       try {
         resolve(canvas.toDataURL('image/jpeg', quality));
@@ -212,12 +219,14 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     canvas.height = video.videoHeight || 720;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
     stopCamera();
     const compressed = await compressReceiptDataUrl(dataUrl);
     setImagePreview(compressed);
-    processReceiptImage(compressed, 'image/jpeg');
+    processReceiptImage(compressed, extractMimeTypeFromDataUrl(compressed));
   };
 
   // Handle selected file from input (camera or file gallery)
@@ -230,17 +239,20 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       const rawResult = reader.result as string;
       const compressed = await compressReceiptDataUrl(rawResult);
       setImagePreview(compressed);
-      processReceiptImage(compressed, 'image/jpeg');
+      processReceiptImage(compressed, extractMimeTypeFromDataUrl(compressed, file.type || 'image/jpeg'));
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
   // Send image to backend Gemini API
-  const processReceiptImage = async (base64Url: string, detectedMimeType: string) => {
+  const processReceiptImage = async (base64Url: string, detectedMimeType?: string) => {
     setIsScanning(true);
     setScanError(null);
     setScannedResult(null);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
 
     try {
       const response = await fetch('/api/scan-receipt', {
@@ -248,9 +260,10 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
         body: JSON.stringify({
           image: base64Url,
-          mimeType: detectedMimeType,
+          mimeType: detectedMimeType || extractMimeTypeFromDataUrl(base64Url),
         }),
       });
 
@@ -262,7 +275,9 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
         throw new Error(
           response.status === 413
             ? 'Ukuran foto terlalu besar. Silakan foto ulang atau gunakan gambar yang lebih ringan.'
-            : `Server pemindai AI mengembalikan respons tidak valid (HTTP ${response.status}). Pastikan server aplikasi aktif.`
+            : response.status === 404
+              ? 'Endpoint pemindai AI (/api/scan-receipt) belum tersedia pada host ini (HTTP 404). Pastikan server backend berjalan atau gunakan input manual di bawah.'
+              : `Server pemindai AI mengembalikan respons tidak valid (HTTP ${response.status}). Pastikan server aplikasi aktif.`
         );
       }
 
@@ -286,10 +301,15 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       }
     } catch (err: any) {
       console.error('Receipt Scan Error:', err);
-      setScanError(
-        err?.message || 'Gagal menganalisis struk. Pastikan foto struk terlihat jelas dan terang.'
-      );
+      if (err?.name === 'AbortError') {
+        setScanError('Waktu pemindaian AI habis (timeout). Periksa koneksi internet Anda lalu klik Pindai Ulang.');
+      } else {
+        setScanError(
+          err?.message || 'Gagal menganalisis struk. Pastikan foto struk terlihat jelas dan terang.'
+        );
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       setIsScanning(false);
     }
   };
@@ -371,11 +391,11 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       >
         {/* Header Modal */}
         <div
-          className={`flex items-center justify-between p-4 sm:p-5 border-b shrink-0 ${
+          className={`flex items-center justify-between gap-3 p-4 sm:p-5 border-b shrink-0 ${
             isLight ? 'border-slate-100 bg-slate-50/70' : 'border-slate-800 bg-[#131D31]/80'
           }`}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
             <div
               className={`w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 ${
                 isLight
@@ -385,14 +405,14 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
             >
               <Camera className="w-5 h-5 stroke-[2.2]" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-base sm:text-lg font-black tracking-tight">
+                <h3 className="text-base sm:text-lg font-black tracking-tight truncate">
                   Pindai Struk Belanja
                 </h3>
               </div>
               <p
-                className={`text-xs mt-0.5 ${
+                className={`text-xs mt-0.5 leading-snug ${
                   isLight ? 'text-slate-500' : 'text-slate-400'
                 }`}
               >
@@ -408,7 +428,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
               onClose();
             }}
             aria-label="Tutup pemindai struk"
-            className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+            className={`p-2 rounded-xl border transition-colors cursor-pointer shrink-0 ${
               isLight
                 ? 'border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-100'
                 : 'border-slate-700/60 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -423,60 +443,31 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
           {/* 1. TAMPILAN AWAL: BELUM ADA FOTO & KAMERA BELUM AKTIF */}
           {!imagePreview && !isCameraActive && (
             <div className="space-y-4 text-center">
-              {/* KARTU IZIN KAMERA DIPERLUKAN (Serupa Izin Mikrofon) */}
               {cameraPermissionStatus === 'denied' && (
-                <div
-                  className={`p-4 rounded-2xl border text-xs text-left space-y-3 ${
-                    isLight
-                      ? 'bg-amber-50 border-amber-200 text-amber-950'
-                      : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5 font-bold">
-                    <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="font-black text-sm">Izin Kamera Diperlukan</h4>
-                      <p className="mt-1 font-semibold leading-relaxed">
-                        {cameraError || 'Perangkat atau peramban Anda belum mengizinkan akses kamera.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div
-                    className={`p-3 rounded-xl text-[11px] font-semibold leading-relaxed ${
-                      isLight
-                        ? 'bg-white/80 border border-amber-200/60'
-                        : 'bg-black/20 border border-amber-500/20'
-                    }`}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={startLiveCamera}
+                    className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors cursor-pointer flex items-center justify-center gap-2"
                   >
-                    💡 <strong>Cara Mengizinkan:</strong> Klik ikon gembok / perizinan situs di bilah alamat (URL bar) browser Anda, aktifkan <strong>Kamera (Camera)</strong>, lalu klik tombol coba lagi di bawah.
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <button
-                      type="button"
-                      onClick={startLiveCamera}
-                      className="flex-1 py-2.5 px-4 rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition-colors cursor-pointer flex items-center justify-center gap-2"
+                    <Camera className="w-4 h-4" />
+                    <span>Izinkan &amp; Buka Kamera</span>
+                  </button>
+                  {typeof window !== 'undefined' && window.self !== window.top && (
+                    <a
+                      href={window.location.origin}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+                        isLight
+                          ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+                          : 'bg-white/10 hover:bg-white/15 text-white border-white/15'
+                      }`}
                     >
-                      <RefreshCw className="w-4 h-4" />
-                      <span>Coba Minta Izin Lagi</span>
-                    </button>
-                    {typeof window !== 'undefined' && window.self !== window.top && (
-                      <a
-                        href={window.location.origin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`py-2.5 px-4 rounded-xl font-bold border transition-colors cursor-pointer flex items-center justify-center gap-2 ${
-                          isLight
-                            ? 'bg-white hover:bg-amber-100 text-amber-900 border-amber-300'
-                            : 'bg-white/10 hover:bg-white/15 text-amber-200 border-amber-500/30'
-                        }`}
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                        <span>Buka di Tab Chrome</span>
-                      </a>
-                    )}
-                  </div>
+                      <ExternalLink className="w-4 h-4" />
+                      <span>Buka di Tab Chrome</span>
+                    </a>
+                  )}
                 </div>
               )}
 
@@ -696,7 +687,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                     <button
                       type="button"
                       disabled={isScanning}
-                      onClick={() => processReceiptImage(imagePreview, 'image/jpeg')}
+                      onClick={() => processReceiptImage(imagePreview, extractMimeTypeFromDataUrl(imagePreview))}
                       className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
@@ -715,20 +706,38 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                 }`}
               >
                 <div
-                  className={`flex items-center justify-between pb-2 border-b-2 border-dashed ${
+                  className={`flex items-center justify-between gap-2 pb-2 border-b-2 border-dashed ${
                     isLight ? 'border-slate-300' : 'border-white/10'
                   }`}
                 >
                   <h4
                     className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
-                      isLight ? 'text-emerald-700' : 'text-emerald-400'
+                      scannedResult
+                        ? (isLight ? 'text-emerald-700' : 'text-emerald-400')
+                        : isScanning
+                          ? (isLight ? 'text-teal-700' : 'text-teal-300')
+                          : (isLight ? 'text-amber-700' : 'text-amber-300')
                     }`}
                   >
-                    <Check className="w-4 h-4 stroke-[3]" />
-                    <span>[ DATA STRUK TERBACA ]</span>
+                    {scannedResult ? (
+                      <>
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>[ DATA STRUK TERBACA ]</span>
+                      </>
+                    ) : isScanning ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>[ MEMINDAI STRUK AI... ]</span>
+                      </>
+                    ) : (
+                      <>
+                        <Receipt className="w-3.5 h-3.5" />
+                        <span>[ ISI RINCIAN STRUK MANUAL ]</span>
+                      </>
+                    )}
                   </h4>
                   {scannedResult?.rawTotalText && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-none border font-bold bg-emerald-100 text-emerald-900 border-emerald-300">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-none border font-bold bg-emerald-100 text-emerald-900 border-emerald-300 shrink-0">
                       RAW: {scannedResult.rawTotalText}
                     </span>
                   )}

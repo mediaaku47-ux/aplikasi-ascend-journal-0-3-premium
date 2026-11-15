@@ -1,1 +1,4 @@
+/api/scan-receipt    /.netlify/functions/scan-receipt    200
+/api/transcribe-audio    /.netlify/functions/transcribe-audio    200
 /*    /index.html   200
+

@@ -860,5 +860,108 @@ export async function sendTargetTestNotification(sampleTitle?: string): Promise<
   });
 }
 
+const INITIAL_PERMISSIONS_PROMPTED_KEY = 'ascend_initial_permissions_prompted';
+let isRequestingInitialPermissions = false;
+
+const stopMediaTracksSafe = (stream: MediaStream | null | undefined) => {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach((track) => {
+      try {
+        track.stop();
+      } catch {}
+    });
+  } catch {}
+};
+
+const isPermissionAlreadyGranted = async (name: 'microphone' | 'camera'): Promise<boolean> => {
+  if (typeof navigator === 'undefined') return false;
+  try {
+    if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+      const status = await navigator.permissions.query({ name: name as PermissionName });
+      return status.state === 'granted';
+    }
+  } catch {}
+  return false;
+};
+
+/**
+ * Langsung memunculkan dialog izin resmi browser untuk Notifikasi, Audio (Mikrofon), dan Kamera
+ * saat pengguna baru masuk tanpa menampilkan kartu/modal perantara.
+ */
+export async function requestInitialDevicePermissions(): Promise<void> {
+  if (typeof window === 'undefined' || isRequestingInitialPermissions) return;
+
+  try {
+    if (localStorage.getItem(INITIAL_PERMISSIONS_PROMPTED_KEY) === 'true') {
+      return;
+    }
+  } catch {}
+
+  isRequestingInitialPermissions = true;
+
+  try {
+    // 1. Langsung minta izin Notifikasi jika masih 'default'
+    if (isWebNotificationSupported() && Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission();
+      } catch {}
+    }
+
+    // 2. Langsung minta izin Audio (Mikrofon) & Kamera jika belum granted
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      const [micGranted, camGranted] = await Promise.all([
+        isPermissionAlreadyGranted('microphone'),
+        isPermissionAlreadyGranted('camera'),
+      ]);
+
+      const needAudio = !micGranted;
+      const needCamera = !camGranted;
+
+      if (needAudio || needCamera) {
+        let combinedStream: MediaStream | null = null;
+        try {
+          combinedStream = await navigator.mediaDevices.getUserMedia({
+            audio: needAudio,
+            video: needCamera,
+          });
+        } catch {
+          stopMediaTracksSafe(combinedStream);
+          combinedStream = null;
+
+          if (needAudio) {
+            let audioStream: MediaStream | null = null;
+            try {
+              audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch {
+            } finally {
+              stopMediaTracksSafe(audioStream);
+            }
+          }
+
+          if (needCamera) {
+            let videoStream: MediaStream | null = null;
+            try {
+              videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            } catch {
+            } finally {
+              stopMediaTracksSafe(videoStream);
+            }
+          }
+        } finally {
+          stopMediaTracksSafe(combinedStream);
+        }
+      }
+    }
+
+    try {
+      localStorage.setItem(INITIAL_PERMISSIONS_PROMPTED_KEY, 'true');
+    } catch {}
+  } finally {
+    isRequestingInitialPermissions = false;
+  }
+}
+
+
 
 
