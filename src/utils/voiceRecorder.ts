@@ -386,34 +386,136 @@ export function formatAudioDuration(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+export interface AITranscriptionResult {
+  transcript: string;
+  error?: string;
+}
+
+function encodeMonoWav(samples: Float32Array, sampleRate: number): Blob {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+/**
+ * Konversi data URL audio/webm atau audio/mp4 ke WAV mono 16kHz yang ringan dan didukung penuh seluruh model AI.
+ */
+async function convertDataUrlToWav16k(audioDataUrl: string): Promise<string> {
+  if (typeof window === 'undefined') return audioDataUrl;
+  const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return audioDataUrl;
+
+  let ctx: AudioContext | null = null;
+  try {
+    const resp = await fetch(audioDataUrl);
+    const arrayBuffer = await resp.arrayBuffer();
+    ctx = new AudioCtx();
+    const decoded = await ctx.decodeAudioData(arrayBuffer);
+
+    const targetRate = 16000;
+    const duration = decoded.duration;
+    // Batasi konversi WAV untuk durasi wajar (<= 90 detik) agar memori HP tetap ringan
+    if (!duration || duration > 90) {
+      return audioDataUrl;
+    }
+
+    const length = Math.max(1, Math.ceil(duration * targetRate));
+    const offline = new OfflineAudioContext(1, length, targetRate);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start(0);
+    const rendered = await offline.startRendering();
+    const channelData = rendered.getChannelData(0);
+    const wavBlob = encodeMonoWav(channelData, targetRate);
+    return await blobToDataUrl(wavBlob);
+  } catch {
+    return audioDataUrl;
+  } finally {
+    if (ctx && typeof ctx.close === 'function') {
+      ctx.close().catch(() => {});
+    }
+  }
+}
+
 /**
  * Transkripsikan rekaman audio via endpoint AI server (/api/transcribe-audio)
- * Digunakan otomatis saat browser HP/mobile tidak mengisi transkripsi Web Speech API secara langsung.
  */
-export async function transcribeAudioWithAI(audioDataUrl: string): Promise<string> {
-  if (!audioDataUrl || !audioDataUrl.startsWith('data:audio')) return '';
+export async function transcribeAudioWithAI(audioDataUrl: string): Promise<AITranscriptionResult> {
+  if (!audioDataUrl || !audioDataUrl.startsWith('data:')) {
+    return { transcript: '', error: 'Data rekaman audio tidak valid.' };
+  }
+
+  const preparedAudio = await convertDataUrlToWav16k(audioDataUrl);
 
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 25000);
+  const timeoutId = window.setTimeout(() => controller.abort(), 40000);
 
   try {
     const response = await fetch('/api/transcribe-audio', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({ audio: audioDataUrl }),
+      body: JSON.stringify({ audio: preparedAudio }),
     });
 
-    if (!response.ok) return '';
-    const json = await response.json().catch(() => null);
-    if (json?.success && typeof json.transcript === 'string') {
-      return json.transcript.trim();
+    const rawText = await response.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      return {
+        transcript: '',
+        error: `Server transkripsi suara belum merespons JSON valid (HTTP ${response.status}).`,
+      };
     }
-    return '';
-  } catch (err) {
-    console.warn('[VoiceRecorder] Fallback AI transcription failed:', err);
-    return '';
+
+    if (!response.ok || !json?.success) {
+      return {
+        transcript: '',
+        error: json?.error || `Gagal mentranskripsikan suara (HTTP ${response.status}).`,
+      };
+    }
+
+    return {
+      transcript: typeof json.transcript === 'string' ? json.transcript.trim() : '',
+    };
+  } catch (err: any) {
+    console.warn('[VoiceRecorder] AI transcription failed:', err);
+    if (err?.name === 'AbortError') {
+      return { transcript: '', error: 'Waktu transkripsi AI habis (timeout). Coba ulangi.' };
+    }
+    return { transcript: '', error: 'Gagal menghubungi server transkripsi AI.' };
   } finally {
     window.clearTimeout(timeoutId);
   }
 }
+

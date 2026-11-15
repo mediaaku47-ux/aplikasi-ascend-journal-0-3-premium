@@ -57,7 +57,7 @@ function extractMimeTypeFromDataUrl(dataUrl: string, fallback = 'image/jpeg'): s
   return match?.[1] || fallback;
 }
 
-async function compressReceiptDataUrl(dataUrl: string, maxDimension = 1600, quality = 0.85): Promise<string> {
+async function compressReceiptDataUrl(dataUrl: string, maxDimension = 1280, quality = 0.78): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -252,7 +252,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     setScannedResult(null);
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 40000);
 
     try {
       const response = await fetch('/api/scan-receipt', {

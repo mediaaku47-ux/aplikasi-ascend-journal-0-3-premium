@@ -95,8 +95,8 @@ Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak dat
 - "confidence": "high", "medium", atau "low".`;
 
       const modelCandidates: Array<{ model: string; timeoutMs: number; thinkingLevel: ThinkingLevel }> = [
-        { model: 'gemini-3.1-flash-lite', timeoutMs: 15000, thinkingLevel: ThinkingLevel.MINIMAL },
-        { model: 'gemini-4-hydrogen', timeoutMs: 15000, thinkingLevel: ThinkingLevel.LOW },
+        { model: 'gemini-3.1-flash-lite', timeoutMs: 12000, thinkingLevel: ThinkingLevel.MINIMAL },
+        { model: 'gemini-4-hydrogen', timeoutMs: 12000, thinkingLevel: ThinkingLevel.LOW },
       ];
 
       let lastError: any = null;
@@ -235,11 +235,16 @@ Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak dat
         });
       }
 
-      const headerMatch = audio.match(/^data:(audio\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,/i);
+      const headerMatch = audio.match(/^data:((?:audio|video|application)\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,/i);
       const cleanBase64 = audio.includes('base64,') ? audio.split('base64,')[1] : audio;
       const rawMime = String(mimeType || headerMatch?.[1] || 'audio/webm');
-      // Gemini inlineData expects clean base MIME type without ';codecs=...'
-      const cleanMimeType = rawMime.split(';')[0].trim() || 'audio/webm';
+      // Gemini inlineData expects clean audio/* base MIME type without ';codecs=...'
+      let cleanMimeType = rawMime.split(';')[0].trim().toLowerCase() || 'audio/webm';
+      if (cleanMimeType.startsWith('video/')) {
+        cleanMimeType = cleanMimeType.replace(/^video\//, 'audio/');
+      } else if (!cleanMimeType.startsWith('audio/')) {
+        cleanMimeType = 'audio/webm';
+      }
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
@@ -250,17 +255,18 @@ Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak dat
       }
 
       const promptText =
-        'Transkripsikan seluruh ucapan dalam rekaman audio ini ke teks bahasa Indonesia (atau sesuai bahasa yang diucapkan) secara akurat dan rapi dengan tanda baca yang baik. Kembalikan HANYA teks hasil transkripsinya saja tanpa tanda kutip, label, atau penjelasan tambahan. Jika tidak terdengar ucapan sama sekali, kembalikan string kosong.';
+        'Dengarkan rekaman suara ini dengan saksama dan transkripsikan seluruh ucapan menjadi teks bahasa Indonesia (atau sesuai bahasa yang diucapkan) secara akurat dan rapi dengan tanda baca yang baik. Kembalikan HANYA teks hasil transkripsinya saja tanpa tanda kutip, label, atau penjelasan tambahan. Jika benar-benar hening tanpa ucapan, kembalikan string kosong.';
 
-      const modelCandidates = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite'];
+      const modelCandidates = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
       let lastError: any = null;
+      let anySuccessEmpty = false;
 
       for (const model of modelCandidates) {
         try {
           const ai = new GoogleGenAI({
             apiKey,
             httpOptions: {
-              timeout: 15000,
+              timeout: 12000,
               headers: {
                 'User-Agent': 'aistudio-build',
               },
@@ -283,10 +289,13 @@ Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak dat
           });
 
           const transcript = (response.text ?? '').trim();
-          return res.json({
-            success: true,
-            transcript,
-          });
+          if (transcript) {
+            return res.json({
+              success: true,
+              transcript,
+            });
+          }
+          anySuccessEmpty = true;
         } catch (err: any) {
           lastError = err;
           const status = Number(err?.status || err?.code || 0);
@@ -295,6 +304,13 @@ Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak dat
             break;
           }
         }
+      }
+
+      if (anySuccessEmpty) {
+        return res.json({
+          success: true,
+          transcript: '',
+        });
       }
 
       console.error('[transcribe-audio] Gemini API error:', lastError?.message || lastError);

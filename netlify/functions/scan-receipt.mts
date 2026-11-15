@@ -80,8 +80,8 @@ Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak dat
 - "confidence": "high", "medium", atau "low".`;
 
     const candidates: Array<{ model: string; timeoutMs: number; thinkingLevel: ThinkingLevel }> = [
-      { model: 'gemini-3.1-flash-lite', timeoutMs: 15000, thinkingLevel: ThinkingLevel.MINIMAL },
-      { model: 'gemini-4-hydrogen', timeoutMs: 15000, thinkingLevel: ThinkingLevel.LOW },
+      { model: 'gemini-3.1-flash-lite', timeoutMs: 12000, thinkingLevel: ThinkingLevel.MINIMAL },
+      { model: 'gemini-4-hydrogen', timeoutMs: 12000, thinkingLevel: ThinkingLevel.LOW },
     ];
 
     let lastError: any = null;

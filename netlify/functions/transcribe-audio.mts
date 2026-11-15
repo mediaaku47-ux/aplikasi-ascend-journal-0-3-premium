@@ -20,10 +20,15 @@ export default async (req: Request): Promise<Response> => {
       return jsonResponse({ success: false, error: 'Data audio tidak ditemukan.' }, 400);
     }
 
-    const headerMatch = audio.match(/^data:(audio\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,/i);
+    const headerMatch = audio.match(/^data:((?:audio|video|application)\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,/i);
     const cleanBase64 = audio.includes('base64,') ? audio.split('base64,')[1] : audio;
     const rawMime = String(mimeType || headerMatch?.[1] || 'audio/webm');
-    const cleanMimeType = rawMime.split(';')[0].trim() || 'audio/webm';
+    let cleanMimeType = rawMime.split(';')[0].trim().toLowerCase() || 'audio/webm';
+    if (cleanMimeType.startsWith('video/')) {
+      cleanMimeType = cleanMimeType.replace(/^video\//, 'audio/');
+    } else if (!cleanMimeType.startsWith('audio/')) {
+      cleanMimeType = 'audio/webm';
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
@@ -34,17 +39,18 @@ export default async (req: Request): Promise<Response> => {
     }
 
     const promptText =
-      'Transkripsikan seluruh ucapan dalam rekaman audio ini ke teks bahasa Indonesia (atau sesuai bahasa yang diucapkan) secara akurat dan rapi dengan tanda baca yang baik. Kembalikan HANYA teks hasil transkripsinya saja tanpa tanda kutip, label, atau penjelasan tambahan. Jika tidak terdengar ucapan sama sekali, kembalikan string kosong.';
+      'Dengarkan rekaman suara ini dengan saksama dan transkripsikan seluruh ucapan menjadi teks bahasa Indonesia (atau sesuai bahasa yang diucapkan) secara akurat dan rapi dengan tanda baca yang baik. Kembalikan HANYA teks hasil transkripsinya saja tanpa tanda kutip, label, atau penjelasan tambahan. Jika benar-benar hening tanpa ucapan, kembalikan string kosong.';
 
-    const modelCandidates = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite'];
+    const modelCandidates = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
     let lastError: any = null;
+    let anySuccessEmpty = false;
 
     for (const model of modelCandidates) {
       try {
         const ai = new GoogleGenAI({
           apiKey,
           httpOptions: {
-            timeout: 15000,
+            timeout: 12000,
             headers: {
               'User-Agent': 'aistudio-build',
             },
@@ -67,7 +73,10 @@ export default async (req: Request): Promise<Response> => {
         });
 
         const transcript = (response.text ?? '').trim();
-        return jsonResponse({ success: true, transcript }, 200);
+        if (transcript) {
+          return jsonResponse({ success: true, transcript }, 200);
+        }
+        anySuccessEmpty = true;
       } catch (err: any) {
         lastError = err;
         const status = Number(err?.status || err?.code || 0);
@@ -76,6 +85,10 @@ export default async (req: Request): Promise<Response> => {
           break;
         }
       }
+    }
+
+    if (anySuccessEmpty) {
+      return jsonResponse({ success: true, transcript: '' }, 200);
     }
 
     return jsonResponse(

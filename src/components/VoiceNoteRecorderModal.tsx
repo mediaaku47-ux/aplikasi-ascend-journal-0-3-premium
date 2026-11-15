@@ -46,6 +46,13 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
     errorMessage: null,
   });
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const [pendingRecording, setPendingRecording] = useState<{
+    audioUrl?: string;
+    duration: number;
+    fallbackTranscript: string;
+    applyToFormOnly: boolean;
+  } | null>(null);
   const isMobile = isMobileDevice();
 
   const controllerRef = useRef<VoiceRecorderController | null>(null);
@@ -65,6 +72,8 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setIsTranscribing(false);
+      setTranscribeError(null);
+      setPendingRecording(null);
       setRecorderState({
         isRecording: false,
         duration: 0,
@@ -76,36 +85,73 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
       void handleStart();
     } else {
       setIsTranscribing(false);
+      setTranscribeError(null);
+      setPendingRecording(null);
       controllerRef.current?.cancelRecording();
     }
   }, [isOpen]);
 
   const handleStart = async () => {
     if (!controllerRef.current) return;
+    setTranscribeError(null);
+    setPendingRecording(null);
     await controllerRef.current.startRecording();
   };
 
-  const resolveFinalTranscript = async (rawTranscript: string, fallbackTranscript: string, audioUrl?: string) => {
-    if (rawTranscript || !audioUrl) return fallbackTranscript;
+  const resolveFinalTranscript = async (
+    rawTranscript: string,
+    fallbackTranscript: string,
+    audioUrl?: string
+  ): Promise<{ text: string; error?: string }> => {
+    if (rawTranscript) return { text: rawTranscript };
+    if (!audioUrl) return { text: fallbackTranscript };
+
     setIsTranscribing(true);
+    setTranscribeError(null);
     try {
-      const aiText = await transcribeAudioWithAI(audioUrl);
-      if (aiText) {
-        setRecorderState((prev) => ({ ...prev, transcript: aiText }));
-        return aiText;
+      const res = await transcribeAudioWithAI(audioUrl);
+      if (res.transcript) {
+        setRecorderState((prev) => ({ ...prev, transcript: res.transcript }));
+        return { text: res.transcript };
       }
+      if (res.error) {
+        return { text: fallbackTranscript, error: res.error };
+      }
+      return { text: fallbackTranscript };
     } finally {
       setIsTranscribing(false);
     }
-    return fallbackTranscript;
   };
 
   const handleFinishSave = async () => {
     if (!controllerRef.current || isTranscribing) return;
+
+    if (pendingRecording) {
+      onFinishSaveDirectly({
+        text: pendingRecording.fallbackTranscript,
+        audioUrl: pendingRecording.audioUrl,
+        duration: pendingRecording.duration,
+      });
+      onClose();
+      return;
+    }
+
     const result = await controllerRef.current.stopRecording();
-    const finalText = await resolveFinalTranscript(result.rawTranscript, result.transcript, result.audioUrl);
+    const resolved = await resolveFinalTranscript(result.rawTranscript, result.transcript, result.audioUrl);
+
+    if (resolved.error && result.audioUrl) {
+      setTranscribeError(resolved.error);
+      setPendingRecording({
+        audioUrl: result.audioUrl,
+        duration: result.duration,
+        fallbackTranscript: resolved.text,
+        applyToFormOnly: false,
+      });
+      return;
+    }
+
     onFinishSaveDirectly({
-      text: finalText,
+      text: resolved.text,
       audioUrl: result.audioUrl,
       duration: result.duration,
     });
@@ -114,10 +160,50 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
 
   const handleApplyToFormOnly = async () => {
     if (!controllerRef.current || isTranscribing) return;
+
+    if (pendingRecording) {
+      if (onApplyToForm) {
+        onApplyToForm(pendingRecording.fallbackTranscript);
+      }
+      onClose();
+      return;
+    }
+
     const result = await controllerRef.current.stopRecording();
-    const finalText = await resolveFinalTranscript(result.rawTranscript, result.transcript, result.audioUrl);
+    const resolved = await resolveFinalTranscript(result.rawTranscript, result.transcript, result.audioUrl);
+
+    if (resolved.error && result.audioUrl) {
+      setTranscribeError(resolved.error);
+      setPendingRecording({
+        audioUrl: result.audioUrl,
+        duration: result.duration,
+        fallbackTranscript: resolved.text,
+        applyToFormOnly: true,
+      });
+      return;
+    }
+
     if (onApplyToForm) {
-      onApplyToForm(finalText);
+      onApplyToForm(resolved.text);
+    }
+    onClose();
+  };
+
+  const handleRetryTranscription = async () => {
+    if (!pendingRecording?.audioUrl || isTranscribing) return;
+    const resolved = await resolveFinalTranscript('', pendingRecording.fallbackTranscript, pendingRecording.audioUrl);
+    if (resolved.error) {
+      setTranscribeError(resolved.error);
+      return;
+    }
+    if (pendingRecording.applyToFormOnly && onApplyToForm) {
+      onApplyToForm(resolved.text);
+    } else {
+      onFinishSaveDirectly({
+        text: resolved.text,
+        audioUrl: pendingRecording.audioUrl,
+        duration: pendingRecording.duration,
+      });
     }
     onClose();
   };
@@ -303,6 +389,10 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
                     ? isLight
                       ? 'bg-teal-50/70 border-teal-200 text-teal-900'
                       : 'bg-teal-500/10 border-teal-500/30 text-teal-200'
+                    : transcribeError
+                    ? isLight
+                      ? 'bg-rose-50 border-rose-200 text-rose-800'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
                     : recorderState.transcript
                     ? isLight
                       ? 'bg-white border-slate-300 text-slate-900 shadow-inner'
@@ -315,6 +405,23 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
                     <div className="flex items-center gap-2 font-bold not-italic">
                       <Loader2 className="w-4 h-4 animate-spin text-teal-500 shrink-0" />
                       <span>Mengubah rekaman suara menjadi teks...</span>
+                    </div>
+                  ) : transcribeError ? (
+                    <div className="space-y-2 not-italic">
+                      <div className="flex items-start gap-2 font-bold">
+                        <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                        <span>{transcribeError}</span>
+                      </div>
+                      {pendingRecording?.audioUrl && (
+                        <button
+                          type="button"
+                          onClick={handleRetryTranscription}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-500 font-bold text-[11px] transition-colors cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Coba Ubah ke Teks Lagi</span>
+                        </button>
+                      )}
                     </div>
                   ) : recorderState.transcript ? (
                     recorderState.transcript
@@ -379,7 +486,7 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
               ) : (
                 <>
                   <Check className="w-4 h-4" />
-                  <span>Selesai &amp; Buat Catatan</span>
+                  <span>{pendingRecording ? 'Simpan Audio Saja' : 'Selesai & Buat Catatan'}</span>
                 </>
               )}
             </button>
