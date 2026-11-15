@@ -34,6 +34,42 @@ export function isSpeechRecognitionSupported(): boolean {
   return 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
 }
 
+let pendingPrimedMicPromise: Promise<{ stream: MediaStream | null; error: any }> | null = null;
+
+/**
+ * Panggil langsung di dalam event onClick tombol sebelum modal terbuka
+ * agar dialog izin mikrofon resmi Google/Chrome langsung muncul tepat pada klik pengguna.
+ */
+export function primeMicrophoneStream(): void {
+  if (!isAudioRecordingSupported()) return;
+  if (pendingPrimedMicPromise) return;
+
+  try {
+    pendingPrimedMicPromise = navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => ({ stream, error: null }))
+      .catch((error) => ({ stream: null, error }));
+  } catch (error) {
+    pendingPrimedMicPromise = Promise.resolve({ stream: null, error });
+  }
+}
+
+export function clearPrimedMicrophoneStream(): void {
+  const p = pendingPrimedMicPromise;
+  pendingPrimedMicPromise = null;
+  if (p) {
+    p.then(({ stream }) => {
+      if (stream) {
+        stream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {}
+        });
+      }
+    }).catch(() => {});
+  }
+}
+
 /**
  * Controller Perekam Suara & Suara-ke-Teks
  */
@@ -61,7 +97,6 @@ export class VoiceRecorderController {
 
     try {
       if (navigator.permissions && navigator.permissions.query) {
-        // Query permission name 'microphone'
         const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
         return status.state; // 'granted' | 'denied' | 'prompt'
       }
@@ -76,6 +111,7 @@ export class VoiceRecorderController {
    */
   async startRecording(initialTranscript: string = ''): Promise<boolean> {
     if (!isAudioRecordingSupported()) {
+      clearPrimedMicrophoneStream();
       this.onStateChange({
         permissionStatus: 'unsupported',
         errorMessage: 'Peramban atau perangkat Anda belum mendukung perekaman audio mikrofon.',
@@ -92,22 +128,21 @@ export class VoiceRecorderController {
     this.durationSeconds = 0;
     this.audioChunks = [];
 
-    // 1. Meminta izin akses mikrofon dari perangkat
+    // 1. Gunakan stream yang dipicu sinkron saat klik tombol, atau minta langsung ke browser
     try {
-      try {
-        this.mediaStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-      } catch (constraintErr: any) {
-        if (constraintErr?.name === 'OverconstrainedError' || constraintErr?.name === 'TypeError') {
-          this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        } else {
-          throw constraintErr;
+      if (pendingPrimedMicPromise) {
+        const primedPromise = pendingPrimedMicPromise;
+        pendingPrimedMicPromise = null;
+        const primed = await primedPromise;
+        if (primed.stream) {
+          this.mediaStream = primed.stream;
+        } else if (primed.error) {
+          throw primed.error;
         }
+      }
+
+      if (!this.mediaStream) {
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
 
       this.onStateChange({
@@ -117,11 +152,11 @@ export class VoiceRecorderController {
     } catch (err: any) {
       console.warn('[VoiceRecorder] Gagal memperoleh izin mikrofon:', err);
       const rawMsg = String(err?.message || '').toLowerCase();
-      let errorMsg = 'Izin mikrofon ditolak oleh perangkat atau peramban.';
+      let errorMsg = 'Izin mikrofon diblokir oleh pengaturan browser.';
       if (rawMsg.includes('permissions policy') || rawMsg.includes('feature policy')) {
-        errorMsg = 'Akses mikrofon masih dibatasi oleh bingkai pratinjau. Klik "Coba Minta Izin Lagi" atau buka langsung di tab Chrome penuh.';
+        errorMsg = 'Akses mikrofon dibatasi oleh bingkai pratinjau. Buka langsung di tab Chrome penuh.';
       } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errorMsg = 'Akses mikrofon ditolak. Silakan izinkan akses mikrofon pada setelan perangkat atau ikon kunci/izin di bilah alamat peramban Anda.';
+        errorMsg = 'Mikrofon sedang berstatus Diblokir di pengaturan browser Anda. Ubah izin Mikrofon menjadi Izinkan di ikon setelan/gembok sebelah alamat situs.';
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         errorMsg = 'Perangkat keras mikrofon tidak terdeteksi pada perangkat Anda.';
       } else if (err.name === 'NotReadableError') {

@@ -273,32 +273,49 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
 
         {/* Konten Utama */}
         <div className="p-5 sm:p-6 space-y-5">
-          {/* KASUS 1: IZIN DITOLAK ATAU ERROR PERANGKAT - TAMPILAN RINGKAS LANGSUNG MINTA IZIN */}
+          {/* KASUS 1: CHROME/PERANGKAT SUDAH MEMBLOKIR MIKROFON SEHINGGA KARTU GOOGLE TIDAK MUNCUL */}
           {recorderState.permissionStatus === 'denied' && (
-            <div className="flex flex-col items-center justify-center py-4 gap-3 text-center">
-              <button
-                type="button"
-                onClick={handleStart}
-                className="w-full py-3 px-4 rounded-2xl font-bold bg-gradient-to-r from-teal-500 to-sky-500 hover:from-teal-400 hover:to-sky-400 text-white transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-teal-500/20"
-              >
-                <Mic className="w-4 h-4" />
-                <span>Izinkan &amp; Mulai Rekam Suara</span>
-              </button>
-              {typeof window !== 'undefined' && window.self !== window.top && (
-                <a
-                  href={window.location.origin}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold border transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+            <div className={`p-4 rounded-2xl border text-xs space-y-2.5 ${
+              isLight ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+            }`}>
+              <div className="flex items-start gap-2.5">
+                <MicOff className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold">Kartu izin Google/Chrome tidak dapat muncul karena status Mikrofon saat ini Diblokir di browser.</p>
+                  <p className={`text-[11px] leading-relaxed ${isLight ? 'text-rose-800/90' : 'text-rose-200/80'}`}>
+                    {recorderState.errorMessage}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {typeof window !== 'undefined' && window.self !== window.top && (
+                  <a
+                    href={window.location.origin}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`py-2 px-3 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                      isLight
+                        ? 'bg-white hover:bg-rose-100 text-rose-900 border-rose-300'
+                        : 'bg-white/10 hover:bg-white/15 text-rose-100 border-rose-400/30'
+                    }`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Buka di Tab Chrome Penuh</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  className={`py-2 px-3 rounded-xl text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
                     isLight
-                      ? 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                      : 'bg-white/5 hover:bg-white/10 text-white/80 border-white/10'
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                      : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30'
                   }`}
                 >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Buka di Tab Chrome Penuh</span>
-                </a>
-              )}
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Coba Lagi</span>
+                </button>
+              </div>
             </div>
           )}
 

@@ -19,6 +19,7 @@ import { triggerConfetti } from '../../utils/confetti';
 import { getRealToday, MONTH_NAMES_ID } from '../../utils/dateUtils';
 import { VoiceNoteRecorderModal } from '../VoiceNoteRecorderModal';
 import { VoiceNotePlayer } from '../VoiceNotePlayer';
+import { primeMicrophoneStream } from '../../utils/voiceRecorder';
 
 interface NotesViewProps {
   notes: QuickNote[];
@@ -270,7 +271,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
         {/* Tombol Catatan Suara Instan diletakkan di atas catatan (Header Utama) */}
         <button
           type="button"
-          onClick={() => setIsVoiceModalOpen(true)}
+          onClick={() => {
+            primeMicrophoneStream();
+            setIsVoiceModalOpen(true);
+          }}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all cursor-pointer shadow-sm ${
             isLight
               ? 'bg-teal-600 hover:bg-teal-700 text-white border-teal-600 shadow-teal-600/20'

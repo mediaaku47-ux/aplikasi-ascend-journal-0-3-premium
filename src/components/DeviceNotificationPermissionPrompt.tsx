@@ -14,34 +14,32 @@ export const DeviceNotificationPermissionPrompt: React.FC<DeviceNotificationPerm
 }) => {
   useEffect(() => {
     let cancelled = false;
+    let alreadyTriggered = false;
 
-    const triggerDirect = async () => {
-      await requestInitialDevicePermissions();
-      if (!cancelled && onPermissionChanged && isWebNotificationSupported()) {
-        onPermissionChanged(Notification.permission);
-      }
+    try {
+      alreadyTriggered = localStorage.getItem('ascend_initial_permissions_prompted') === 'true';
+    } catch {}
+
+    const runPermissionRequests = () => {
+      if (cancelled) return;
+      void requestInitialDevicePermissions().then(() => {
+        if (!cancelled && onPermissionChanged && isWebNotificationSupported()) {
+          onPermissionChanged(Notification.permission);
+        }
+      });
     };
 
-    void triggerDirect();
-
-    // Fallback apabila browser mewajibkan interaksi tap pertama untuk memicu dialog izin resmi
-    const handleFirstTap = () => {
-      if (isWebNotificationSupported() && Notification.permission === 'default') {
-        void Notification.requestPermission().then((perm) => {
-          if (!cancelled && onPermissionChanged) {
-            onPermissionChanged(perm);
-          }
-        });
-      }
-    };
-
-    if (isWebNotificationSupported() && Notification.permission === 'default') {
-      window.addEventListener('pointerdown', handleFirstTap, { once: true, capture: true });
+    // Jika belum pernah diminta pada klik masuk, picu langsung pada sentuhan/klik pertama di aplikasi
+    // agar kartu izin resmi dari Google/Chrome muncul (Chrome memblokir popup izin yang dipanggil tanpa klik).
+    if (!alreadyTriggered) {
+      window.addEventListener('pointerdown', runPermissionRequests, { once: true, capture: true });
+      window.addEventListener('keydown', runPermissionRequests, { once: true, capture: true });
     }
 
     return () => {
       cancelled = true;
-      window.removeEventListener('pointerdown', handleFirstTap, { capture: true });
+      window.removeEventListener('pointerdown', runPermissionRequests, { capture: true });
+      window.removeEventListener('keydown', runPermissionRequests, { capture: true });
     };
   }, [onPermissionChanged]);
 

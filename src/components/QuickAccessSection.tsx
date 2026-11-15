@@ -15,6 +15,7 @@ import { getRealToday, toISODateString, formatReadableDate } from '../utils/date
 import { triggerConfetti } from '../utils/confetti';
 import { VoiceNoteRecorderModal } from './VoiceNoteRecorderModal';
 import { ReceiptScannerModal } from './ReceiptScannerModal';
+import { primeMicrophoneStream } from '../utils/voiceRecorder';
 
 interface QuickAccessSectionProps {
   onNavigateToTab: (tab: NavTab) => void;
@@ -232,7 +233,10 @@ export const QuickAccessSection: React.FC<QuickAccessSectionProps> = ({
           {/* KARTU 1: CATAT DENGAN REKAMAN SUARA */}
           <button
             type="button"
-            onClick={() => setIsVoiceModalOpen(true)}
+            onClick={() => {
+              primeMicrophoneStream();
+              setIsVoiceModalOpen(true);
+            }}
             className={`group relative overflow-hidden rounded-xl sm:rounded-2xl p-3 sm:p-3.5 flex flex-col justify-between text-left transition-all duration-200 cursor-pointer border min-h-[118px] sm:min-h-[124px] select-none shadow-xs hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] ${
               isLight
                 ? 'bg-gradient-to-b from-white via-rose-50/20 to-rose-50/40 hover:from-white hover:to-rose-100/40 border-rose-200/80 hover:border-rose-300 text-slate-900'

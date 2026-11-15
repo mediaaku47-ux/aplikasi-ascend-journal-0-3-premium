@@ -5,6 +5,7 @@ import { toISODateString, formatReadableDate, MONTH_NAMES_SHORT_ID } from '../ut
 import { triggerConfetti } from '../utils/confetti';
 import { VoiceNoteRecorderModal } from './VoiceNoteRecorderModal';
 import { ReceiptScannerModal } from './ReceiptScannerModal';
+import { primeMicrophoneStream } from '../utils/voiceRecorder';
 
 interface NewEntryModalProps {
   isOpen: boolean;
@@ -458,7 +459,10 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
                 </label>
                 <button
                   type="button"
-                  onClick={() => setIsVoiceModalOpen(true)}
+                  onClick={() => {
+                    primeMicrophoneStream();
+                    setIsVoiceModalOpen(true);
+                  }}
                   className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-xl border transition-all cursor-pointer ${
                     isLight
                       ? 'text-teal-800 bg-teal-50 border-teal-200 hover:bg-teal-100'
