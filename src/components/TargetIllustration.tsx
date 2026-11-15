@@ -168,3 +168,219 @@ export const TargetIllustration: React.FC<TargetIllustrationProps> = ({
     </svg>
   );
 };
+
+interface TargetCategoryIllustrationProps {
+  category?: string;
+  theme?: 'dark' | 'light';
+  className?: string;
+}
+
+export const TargetCategoryIllustration: React.FC<TargetCategoryIllustrationProps> = ({
+  category = 'Produktif',
+  theme = 'dark',
+  className = 'w-12 h-12',
+}) => {
+  const isLight = theme === 'light';
+  const normalized = category.trim().toLowerCase();
+
+  const renderGraphic = () => {
+    if (normalized.includes('kesehatan') || normalized.includes('health') || normalized.includes('olahraga')) {
+      return (
+        <svg viewBox="0 0 48 48" fill="none" className="w-full h-full" aria-hidden="true">
+          <rect
+            x="4"
+            y="4"
+            width="40"
+            height="40"
+            rx="12"
+            fill={isLight ? '#ECFDF5' : '#064E3B'}
+            fillOpacity={isLight ? 1 : 0.45}
+          />
+          <path
+            d="M24 35.5C24 35.5 12.5 28.4 12.5 20.3C12.5 16.7 15.3 14 18.7 14C20.9 14 22.9 15.1 24 16.8C25.1 15.1 27.1 14 29.3 14C32.7 14 35.5 16.7 35.5 20.3C35.5 28.4 24 35.5 24 35.5Z"
+            fill={isLight ? '#10B981' : '#34D399'}
+            fillOpacity="0.22"
+            stroke={isLight ? '#059669' : '#34D399'}
+            strokeWidth="2.2"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M16.5 23H20L22 19L25 27L27.2 22.5H31.5"
+            stroke={isLight ? '#047857' : '#A7F3D0'}
+            strokeWidth="2.1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    }
+
+    if (normalized.includes('keuangan') || normalized.includes('finance') || normalized.includes('uang')) {
+      return (
+        <svg viewBox="0 0 48 48" fill="none" className="w-full h-full" aria-hidden="true">
+          <rect
+            x="4"
+            y="4"
+            width="40"
+            height="40"
+            rx="12"
+            fill={isLight ? '#FFFBEB' : '#78350F'}
+            fillOpacity={isLight ? 1 : 0.4}
+          />
+          <rect x="13" y="26" width="5" height="9" rx="2" fill={isLight ? '#F59E0B' : '#FBBF24'} fillOpacity="0.45" />
+          <rect x="21.5" y="21" width="5" height="14" rx="2" fill={isLight ? '#F59E0B' : '#FBBF24'} fillOpacity="0.7" />
+          <rect x="30" y="15" width="5" height="20" rx="2" fill={isLight ? '#D97706' : '#FCD34D'} />
+          <path
+            d="M14 20.5L21 15.5L26 17.5L33.5 11.5"
+            stroke={isLight ? '#059669' : '#34D399'}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M29.5 11.5H33.5V15.5"
+            stroke={isLight ? '#059669' : '#34D399'}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    }
+
+    if (normalized.includes('konsistensi') || normalized.includes('habit') || normalized.includes('rutin')) {
+      return (
+        <svg viewBox="0 0 48 48" fill="none" className="w-full h-full" aria-hidden="true">
+          <rect
+            x="4"
+            y="4"
+            width="40"
+            height="40"
+            rx="12"
+            fill={isLight ? '#EFF6FF' : '#1E3A8A'}
+            fillOpacity={isLight ? 1 : 0.4}
+          />
+          <rect
+            x="13"
+            y="14.5"
+            width="22"
+            height="20"
+            rx="4"
+            fill={isLight ? '#FFFFFF' : '#0F172A'}
+            stroke={isLight ? '#2563EB' : '#60A5FA'}
+            strokeWidth="2.1"
+          />
+          <path
+            d="M18 12V16.5M30 12V16.5M13.5 20.5H34.5"
+            stroke={isLight ? '#2563EB' : '#60A5FA'}
+            strokeWidth="2.1"
+            strokeLinecap="round"
+          />
+          <path
+            d="M19.5 27L22.5 30L28.8 23.8"
+            stroke={isLight ? '#0D9488' : '#2DD4BF'}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    }
+
+    if (normalized.includes('pengembangan') || normalized.includes('belajar') || normalized.includes('growth')) {
+      return (
+        <svg viewBox="0 0 48 48" fill="none" className="w-full h-full" aria-hidden="true">
+          <rect
+            x="4"
+            y="4"
+            width="40"
+            height="40"
+            rx="12"
+            fill={isLight ? '#F5F3FF' : '#4C1D95'}
+            fillOpacity={isLight ? 1 : 0.4}
+          />
+          <path
+            d="M24 18C21.2 16 17.2 15.5 13 16.5V32C17.2 31 21.2 31.5 24 33.5C26.8 31.5 30.8 31 35 32V16.5C30.8 15.5 26.8 16 24 18Z"
+            fill={isLight ? '#8B5CF6' : '#A78BFA'}
+            fillOpacity="0.2"
+            stroke={isLight ? '#7C3AED' : '#C4B5FD'}
+            strokeWidth="2.1"
+            strokeLinejoin="round"
+          />
+          <path d="M24 18V33.5" stroke={isLight ? '#7C3AED' : '#C4B5FD'} strokeWidth="2" />
+          <circle cx="24" cy="12" r="2.2" fill={isLight ? '#F59E0B' : '#FCD34D'} />
+        </svg>
+      );
+    }
+
+    if (normalized.includes('produktif')) {
+      return (
+        <svg viewBox="0 0 48 48" fill="none" className="w-full h-full" aria-hidden="true">
+          <rect
+            x="4"
+            y="4"
+            width="40"
+            height="40"
+            rx="12"
+            fill={isLight ? '#F0FDFA' : '#134E4A'}
+            fillOpacity={isLight ? 1 : 0.45}
+          />
+          <rect
+            x="14"
+            y="13"
+            width="20"
+            height="23"
+            rx="4"
+            fill={isLight ? '#FFFFFF' : '#0F172A'}
+            stroke={isLight ? '#0D9488' : '#2DD4BF'}
+            strokeWidth="2.1"
+          />
+          <rect x="19.5" y="10.5" width="9" height="4.5" rx="2" fill={isLight ? '#0D9488' : '#2DD4BF'} />
+          <path
+            d="M18.5 22.5L21 25L25.5 20.5"
+            stroke={isLight ? '#0D9488' : '#34D399'}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M19 29.5H29"
+            stroke={isLight ? '#94A3B8' : '#64748B'}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    }
+
+    // Default bullseye target illustration
+    return (
+      <svg viewBox="0 0 48 48" fill="none" className="w-full h-full" aria-hidden="true">
+        <rect
+          x="4"
+          y="4"
+          width="40"
+          height="40"
+          rx="12"
+          fill={isLight ? '#F0F9FF' : '#0C4A6E'}
+          fillOpacity={isLight ? 1 : 0.45}
+        />
+        <circle cx="24" cy="24" r="11" stroke={isLight ? '#0284C7' : '#38BDF8'} strokeWidth="2.2" />
+        <circle cx="24" cy="24" r="6.5" stroke={isLight ? '#0D9488' : '#2DD4BF'} strokeWidth="2" />
+        <circle cx="24" cy="24" r="2.5" fill={isLight ? '#0F172A' : '#FFFFFF'} />
+      </svg>
+    );
+  };
+
+  return (
+    <div
+      className={`shrink-0 select-none overflow-hidden rounded-xl border ${
+        isLight ? 'border-slate-200/80 shadow-xs' : 'border-white/10'
+      } ${className}`}
+      title={`Kategori: ${category}`}
+    >
+      {renderGraphic()}
+    </div>
+  );
+};
+

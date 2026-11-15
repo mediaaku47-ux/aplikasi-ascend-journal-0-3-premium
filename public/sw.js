@@ -1,6 +1,7 @@
-// JournalStream Service Worker for Progressive Web App (PWA)
-const CACHE_NAME = 'journal-stream-pwa-v25';
+// Ascend Journal Service Worker for Progressive Web App (PWA)
+const CACHE_NAME = 'ascend-journal-pwa-v26';
 const STATIC_ASSETS = [
+  '/',
   '/manifest.json',
   '/logo.png',
   '/pwa-192x192.png',
@@ -22,7 +23,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.map((key) => caches.delete(key))
+        keys
+          .filter((key) => key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
       );
     }).then(() => self.clients.claim())
   );
@@ -34,10 +37,11 @@ self.addEventListener('fetch', (event) => {
   
   const url = new URL(event.request.url);
 
-  // Never intercept dev server internals, HMR, modules, or vite
+  // Never intercept dev server internals, HMR, modules, API routes, or vite
   if (
     url.pathname.startsWith('/@') || 
     url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/api/') ||
     url.pathname.endsWith('.tsx') ||
     url.pathname.endsWith('.ts') ||
     url.pathname.includes('node_modules') || 
@@ -47,10 +51,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-First for HTML document navigation to always deliver the latest live code
+  // Network-First for HTML document navigation to always deliver the latest live code, with offline cache fallback
   if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          const cached = await caches.match(event.request);
+          return cached || (await caches.match('/'));
+        })
     );
     return;
   }

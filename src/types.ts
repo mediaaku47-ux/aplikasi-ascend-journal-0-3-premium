@@ -78,6 +78,12 @@ export interface UserProfile {
 
 export type TargetPeriod = 'daily' | 'monthly' | 'weekly';
 
+export interface TargetSubTask {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
 export interface TargetItem {
   id: string;
   title: string;
@@ -90,6 +96,14 @@ export interface TargetItem {
   isManual?: boolean;
   autoTrack?: 'today_tasks' | 'today_habits' | 'streak_days' | 'monthly_consistency' | 'custom';
   createdAt?: string;
+  subtasks?: TargetSubTask[];
+  streakDays?: number;
+  lastCompletedDate?: string;
+  completedDates?: string[];
+  celebratedWeeks?: string[];
+  deadlineDate?: string;
+  reminderMode?: 'daily' | 'deadline_only';
+  reminderTime?: string;
 }
 
 export type AnnouncementType = 'info' | 'update' | 'warning' | 'event';

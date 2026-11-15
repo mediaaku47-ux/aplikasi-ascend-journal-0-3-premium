@@ -3,7 +3,8 @@ import { UserProfile } from '../types';
 import { 
   X, 
   RefreshCw, 
-  HelpCircle
+  HelpCircle,
+  Star
 } from 'lucide-react';
 import { MONTH_NAMES_ID, getDaysInMonth, getYearOptions } from '../utils/dateUtils';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -36,6 +37,7 @@ interface SettingsModalProps {
   onLogout?: () => void;
   onOpenProfile?: () => void;
   onOpenHelp?: () => void;
+  onOpenFeedback?: () => void;
   theme?: 'dark' | 'light';
   onToggleTheme?: () => void;
 }
@@ -58,6 +60,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onLogout,
   onOpenProfile,
   onOpenHelp,
+  onOpenFeedback,
   theme = 'light',
   onToggleTheme,
 }) => {
@@ -442,6 +445,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Backup & Data Management Controls */}
           <div className="pt-3 border-t border-white/10 space-y-2.5">
+
+            {onOpenFeedback && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenFeedback();
+                }}
+                className="w-full text-xs text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-center gap-2 font-semibold cursor-pointer transition-all"
+              >
+                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                <span>
+                  {userProfile.feedback?.submittedAt ? 'Ubah Bintang & Saran Pengalaman' : 'Beri Bintang & Saran Pengalaman'}
+                </span>
+              </button>
+            )}
 
             {onOpenHelp && (
               <button

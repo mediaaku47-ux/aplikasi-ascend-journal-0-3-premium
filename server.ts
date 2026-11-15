@@ -3,8 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
-import { runSupabaseMigration } from './scripts/migrate.js';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 
 dotenv.config();
 
@@ -24,6 +23,7 @@ async function startServer() {
     try {
       const { connectionString, password } = req.body || {};
       const param = connectionString || password;
+      const { runSupabaseMigration } = await import('./scripts/migrate.ts');
       const result = await runSupabaseMigration(param);
       res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
@@ -31,12 +31,12 @@ async function startServer() {
     }
   });
 
-  // API Route: Scan Struk Belanja / Receipt OCR dengan Gemini 3.8 Flash
+  // API Route: Scan Struk Belanja / Receipt OCR dengan Gemini 4 Hydrogen
   app.post('/api/scan-receipt', async (req, res) => {
     try {
       const { image, mimeType } = req.body || {};
 
-      if (!image) {
+      if (!image || typeof image !== 'string') {
         return res.status(400).json({
           success: false,
           error: 'Foto struk tidak ditemukan. Silakan ambil atau unggah foto struk belanja Anda.',
@@ -48,95 +48,127 @@ async function startServer() {
       const cleanMimeType = mimeType || 'image/jpeg';
 
       const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        // Fallback cerdas saat GEMINI_API_KEY belum disetel di environment
-        const todayIso = new Date().toISOString().split('T')[0];
-        return res.json({
-          success: true,
-          data: {
-            amount: 45000,
-            description: 'Struk Belanja Kasir',
-            category: 'Kebutuhan Sehari-hari',
-            date: todayIso,
-            merchant: 'Kasir / Minimarket',
-            items: ['Belanja Kebutuhan Harian - Rp 45.000'],
-            rawTotalText: 'Rp 45.000',
-            confidence: 'medium',
-          },
+      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+        return res.status(503).json({
+          success: false,
+          error: 'Kunci API Gemini (GEMINI_API_KEY) belum dikonfigurasi di server.',
         });
       }
 
-      try {
-        const ai = new GoogleGenAI();
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: cleanMimeType,
-                  data: cleanBase64,
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          timeout: 25000,
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+
+      const promptText = `Anda adalah pakar pembaca struk kasir, nota belanja, dan tanda terima pembayaran otomatis (Receipt Scanner OCR).
+Teliti foto struk belanja atau nota pembayaran ini dengan cermat dan ekstrak datanya:
+- "amount": Total akhir / grand total pembayaran (angka numerik murni tanpa pemisah ribuan, contoh 72000). Abaikan uang tunai bayar / kembalian; ambil total tagihan/belanja yang dibayar.
+- "description": Keterangan singkat nama toko dan barang utama, contoh "Karis Jaya Shop - Indomie & Fruit Tea".
+- "category": Pilih tepat satu dari: "Makanan & Minuman", "Kebutuhan Sehari-hari", "Belanja", "Transportasi", "Tagihan & Utilitas", "Kesehatan", "Pendidikan", "Hiburan", "Lainnya".
+- "date": Tanggal transaksi format YYYY-MM-DD jika terbaca jelas pada struk, atau string kosong "" jika tidak terbaca.
+- "merchant": Nama toko/kasir/gerai.
+- "items": Daftar maksimal 6 item barang yang dibeli beserta harganya jika terbaca.
+- "rawTotalText": Teks nominal total asli yang tercetak pada struk (misal "Rp 72.000").
+- "confidence": "high", "medium", atau "low".`;
+
+      let lastError: any = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data: cleanBase64,
+                  },
+                },
+                {
+                  text: promptText,
+                },
+              ],
+            },
+            config: {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  amount: { type: Type.NUMBER, description: 'Total akhir pembayaran dalam angka murni.' },
+                  description: { type: Type.STRING, description: 'Ringkasan nama toko dan barang utama.' },
+                  category: { type: Type.STRING, description: 'Kategori pengeluaran paling sesuai.' },
+                  date: { type: Type.STRING, description: 'Tanggal format YYYY-MM-DD atau kosong jika tidak terbaca.' },
+                  merchant: { type: Type.STRING, description: 'Nama toko atau merchant.' },
+                  items: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Daftar item barang yang terbaca.',
+                  },
+                  rawTotalText: { type: Type.STRING, description: 'Teks total asli seperti di struk.' },
+                  confidence: { type: Type.STRING, description: 'Tingkat keyakinan: high, medium, atau low.' },
                 },
               },
-              {
-                text: `Anda adalah pakar pembaca struk kasir, nota belanja, dan tanda terima pembayaran otomatis (Receipt Scanner OCR).
-Tolong teliti foto struk belanja / nota pembayaran ini dan ekstrak data pengeluaran dalam format JSON dengan skema berikut:
-{
-  "amount": number (Total akhir / grand total pembayaran yang harus dibayar. Hanya angka numerik murni tanpa titik, koma ribuan, atau simbol mata uang, contoh: 45000),
-  "description": string (Keterangan ringkas berisi nama toko/merchant dan barang utama yang dibeli, contoh: "Indomaret - Kopi & Roti" atau "SPBU Pertamina - Pertalite"),
-  "category": string (Wajib pilih salah satu yang paling sesuai dari: "Makanan & Minuman", "Kebutuhan Sehari-hari", "Belanja", "Transportasi", "Tagihan & Utilitas", "Kesehatan", "Pendidikan", "Hiburan", "Lainnya"),
-  "date": string (Tanggal transaksi dalam format YYYY-MM-DD jika terbaca pada struk, atau null jika tidak terbaca),
-  "merchant": string (Nama toko/vendor/gerai, contoh: "Alfamart", "McDonalds", "Apotek Kimia Farma"),
-  "items": string[] (Daftar ringkas nama 1-6 barang yang dibeli beserta harga masing-masing jika terbaca, contoh: ["Roti Gandum - 18.000", "Susu UHT - 12.000"]),
-  "rawTotalText": string (Teks nominal asli seperti yang tertera di struk, contoh: "Rp 30.000"),
-  "confidence": string ("high" | "medium" | "low")
-}
+            },
+          });
 
-PERINGATAN: Berikan respons hanya berupa JSON murni yang valid tanpa format markdown atau tanda kutip pembungkus \`\`\`json.`,
-              },
-            ],
-          },
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
+          const textOutput = (response.text ?? '').trim();
+          if (!textOutput) {
+            throw new Error('AI tidak mengembalikan hasil pembacaan struk.');
+          }
 
-        const textOutput = response.text || '';
-        let parsedData;
-        try {
-          parsedData = JSON.parse(textOutput);
-        } catch {
-          const cleaned = textOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
-          parsedData = JSON.parse(cleaned);
+          let parsedData: any;
+          try {
+            parsedData = JSON.parse(textOutput);
+          } catch {
+            const cleaned = textOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
+            parsedData = JSON.parse(cleaned);
+          }
+
+          if (typeof parsedData.amount === 'string') {
+            const num = parseFloat(parsedData.amount.replace(/[^0-9.]/g, ''));
+            parsedData.amount = isNaN(num) ? 0 : num;
+          }
+          if (!parsedData.date) {
+            parsedData.date = null;
+          }
+
+          return res.json({
+            success: true,
+            data: parsedData,
+          });
+        } catch (geminiError: any) {
+          lastError = geminiError;
+          const status = geminiError?.status || geminiError?.code;
+          const isRetryable = status === 429 || (typeof status === 'number' && status >= 500) || !status;
+          if (attempt < 2 && isRetryable) {
+            await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+            continue;
+          }
+          break;
         }
-
-        // Pastikan amount adalah number valid
-        if (typeof parsedData.amount === 'string') {
-          const num = parseFloat(parsedData.amount.replace(/[^0-9.]/g, ''));
-          parsedData.amount = isNaN(num) ? 0 : num;
-        }
-
-        return res.json({
-          success: true,
-          data: parsedData,
-        });
-      } catch (geminiError: any) {
-        console.warn('Gemini OCR API encountered an issue, providing fallback:', geminiError?.message);
-        const todayIso = new Date().toISOString().split('T')[0];
-        return res.json({
-          success: true,
-          data: {
-            amount: 35000,
-            description: 'Struk Belanja Kasir',
-            category: 'Kebutuhan Sehari-hari',
-            date: todayIso,
-            merchant: 'Nota Belanja',
-            items: ['Belanja Tercatat - Rp 35.000'],
-            rawTotalText: 'Rp 35.000',
-            confidence: 'medium',
-          },
-        });
       }
+
+      const statusCode = Number(lastError?.status) || 502;
+      let userError = 'Gagal menganalisis foto struk dengan AI.';
+      if (statusCode === 403 || statusCode === 400) {
+        userError = 'Konfigurasi kunci API Gemini belum valid. Periksa GEMINI_API_KEY pada pengaturan Secrets.';
+      } else if (statusCode === 429) {
+        userError = 'Permintaan AI sedang padat (batas kuota tercapai). Silakan coba sesaat lagi.';
+      } else if (lastError?.message) {
+        userError = `Gagal menganalisis struk: ${lastError.message}`;
+      }
+
+      console.error('[scan-receipt] Gemini API error:', lastError?.message || lastError);
+      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
+        success: false,
+        error: userError,
+      });
     } catch (error: any) {
       console.error('Error scanning receipt:', error);
       return res.status(500).json({
@@ -178,6 +210,16 @@ Disallow: /api/
 - Sinkronisasi Cloud: Supabase (PostgreSQL, Realtime Channel, Auth)
 - AI Scanner: Gemini API untuk ekstraksi data struk belanja kasir otomatis
 `);
+  });
+
+  // Pastikan semua error middleware /api/* (seperti payload terlalu besar) selalu mengembalikan JSON, bukan HTML
+  app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status = err?.status || err?.statusCode || 500;
+    const message =
+      status === 413
+        ? 'Ukuran foto terlalu besar. Silakan kompres atau gunakan foto yang lebih ringan.'
+        : err?.message || 'Terjadi kesalahan pada server API.';
+    res.status(status).json({ success: false, error: message });
   });
 
   const isProd = process.env.NODE_ENV === 'production';

@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AuthScreen } from './components/AuthScreen';
 import { MainDashboard } from './components/MainDashboard';
+import { AppEntryChoiceModal } from './components/AppEntryChoiceModal';
 import { authService, dbService } from './lib/supabaseService';
 import { isSupabaseConfigured } from './lib/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { UserProfile } from './types';
 import { CheckCircle2 } from 'lucide-react';
+import { usePWAInstall } from './hooks/usePWAInstall';
 
 const getFallbackDefaultUser = (): SupabaseUser => {
   let createdAt = '';
@@ -29,6 +31,8 @@ const getFallbackDefaultUser = (): SupabaseUser => {
 };
 
 export default function App() {
+  const { isInstalled } = usePWAInstall();
+
   const [currentUser, setCurrentUser] = useState<SupabaseUser>(() => {
     try {
       const cached = localStorage.getItem('journalstream_current_user');
@@ -56,14 +60,42 @@ export default function App() {
       return true;
     }
   });
+
+  const [openedViaInstallAction] = useState<boolean>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('action') === 'install';
+    } catch {
+      return false;
+    }
+  });
+
+  const [showEntryChoiceModal, setShowEntryChoiceModal] = useState<boolean>(openedViaInstallAction);
+
+  const [pendingWelcomeToast, setPendingWelcomeToast] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
     }, 3500);
-  };
+  }, []);
+
+  // Bersihkan query parameter ?action=install dari URL setelah dibaca, atau tutup otomatis jika sudah standalone
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('action') === 'install') {
+        window.history.replaceState({}, '', window.location.pathname);
+        if (isInstalled) {
+          setShowEntryChoiceModal(false);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [isInstalled]);
 
   // Pengecekan sesi Supabase berjalan murni secara asynchronous di latar belakang tanpa menahan render
   useEffect(() => {
@@ -106,11 +138,22 @@ export default function App() {
         if (!isMounted) return;
         if (user) {
           setCurrentUser(user);
-          setIsAuthFlowOpen(false);
           try {
             localStorage.setItem('journalstream_current_user', JSON.stringify(user));
-            localStorage.setItem('journalstream_has_completed_welcome', 'true');
           } catch {}
+
+          const hasCompletedPreviously = (() => {
+            try {
+              return localStorage.getItem('journalstream_has_completed_welcome') === 'true';
+            } catch {
+              return false;
+            }
+          })();
+
+          if (hasCompletedPreviously) {
+            setIsAuthFlowOpen(false);
+          }
+
           try {
             const profile = await dbService.ensureUserProfileInitialized(
               user.id,
@@ -138,13 +181,42 @@ export default function App() {
     };
   }, []);
 
+  const completeEntryAndOpenDashboard = useCallback(
+    (welcomeText?: string) => {
+      setShowEntryChoiceModal(false);
+
+      const hasAuthenticatedSession = (() => {
+        if (welcomeText || pendingWelcomeToast) return true;
+        try {
+          return (
+            Boolean(localStorage.getItem('journalstream_current_user')) ||
+            localStorage.getItem('journalstream_has_completed_welcome') === 'true'
+          );
+        } catch {
+          return false;
+        }
+      })();
+
+      if (hasAuthenticatedSession) {
+        setIsAuthFlowOpen(false);
+        try {
+          localStorage.setItem('journalstream_has_completed_welcome', 'true');
+        } catch {}
+        const msg = welcomeText || pendingWelcomeToast;
+        if (msg) {
+          setPendingWelcomeToast(null);
+          showToast(msg);
+        }
+      }
+    },
+    [pendingWelcomeToast, showToast]
+  );
+
   // Callback setelah pengguna berhasil Login atau Daftar akun dari form
   const handleAuthSuccess = (user: SupabaseUser, initialProf?: UserProfile) => {
     setCurrentUser(user);
-    setIsAuthFlowOpen(false);
     try {
       localStorage.setItem('journalstream_current_user', JSON.stringify(user));
-      localStorage.setItem('journalstream_has_completed_welcome', 'true');
     } catch {}
     if (initialProf) {
       setCurrentProfile(initialProf);
@@ -152,14 +224,21 @@ export default function App() {
         localStorage.setItem('journalstream_user_profile', JSON.stringify(initialProf));
       } catch {}
     }
+
     const displayName = user.user_metadata?.full_name || user.email || 'Pengguna';
-    showToast(`Selamat datang, ${displayName}!`);
+    const welcomeMsg = `Selamat datang, ${displayName}!`;
+
+    if (isInstalled) {
+      completeEntryAndOpenDashboard(welcomeMsg);
+    } else {
+      setPendingWelcomeToast(welcomeMsg);
+      setShowEntryChoiceModal(true);
+    }
   };
 
   const handleContinueAsGuest = () => {
-    setIsAuthFlowOpen(false);
     try {
-      localStorage.setItem('journalstream_has_completed_welcome', 'true');
+      localStorage.setItem('journalstream_current_user', JSON.stringify(currentUser));
       let createdAt = localStorage.getItem('ascend_account_created_at');
       if (!createdAt || createdAt === '2026-01-01T00:00:00.000Z') {
         localStorage.setItem('ascend_account_created_at', new Date().toISOString());
@@ -168,7 +247,14 @@ export default function App() {
         localStorage.setItem('ascend_theme', 'light');
       }
     } catch {}
-    showToast('Selamat datang di Ascend Journal! (Mode Tamu)');
+
+    const welcomeMsg = 'Selamat datang di Ascend Journal! (Mode Tamu)';
+    if (isInstalled) {
+      completeEntryAndOpenDashboard(welcomeMsg);
+    } else {
+      setPendingWelcomeToast(welcomeMsg);
+      setShowEntryChoiceModal(true);
+    }
   };
 
   // Keluar dari akun (Logout)
@@ -180,6 +266,8 @@ export default function App() {
     } finally {
       setCurrentUser(getFallbackDefaultUser());
       setCurrentProfile(null);
+      setShowEntryChoiceModal(false);
+      setPendingWelcomeToast(null);
       setIsAuthFlowOpen(true);
       try {
         localStorage.removeItem('journalstream_current_user');
@@ -206,6 +294,14 @@ export default function App() {
           onLogout={handleLogout}
         />
       )}
+
+      {/* Modal 2 Opsi setelah pengguna mengklik Masuk: Download Aplikasi atau Lanjutkan di Chrome */}
+      <AppEntryChoiceModal
+        isOpen={showEntryChoiceModal}
+        onContinueInChrome={() => completeEntryAndOpenDashboard()}
+        onClose={() => completeEntryAndOpenDashboard()}
+        autoPromptInstall={openedViaInstallAction}
+      />
 
       {/* Floating Global Toast Notification */}
       {toastMessage && (

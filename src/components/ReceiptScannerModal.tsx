@@ -1,13 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Camera, 
-  Upload, 
-  X, 
-  Check, 
-  AlertCircle, 
-  RotateCw, 
-  Receipt, 
-  Loader2
+import {
+  Camera,
+  Upload,
+  X,
+  Check,
+  AlertCircle,
+  RotateCw,
+  Receipt,
+  Loader2,
+  RefreshCw,
+  ExternalLink,
+  Video,
 } from 'lucide-react';
 import { Transaction } from '../types';
 import { formatCurrency } from '../utils/formatters';
@@ -45,6 +48,40 @@ const CATEGORIES = [
   'Lainnya',
 ];
 
+/**
+ * Kompres gambar struk di sisi klien sebelum dikirim ke /api/scan-receipt
+ * agar foto kamera HP beresolusi tinggi (8-20MB) mengecil menjadi ~200-450KB tanpa mengurangi ketajaman teks struk.
+ */
+async function compressReceiptDataUrl(dataUrl: string, maxDimension = 1600, quality = 0.85): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDimension || height > maxDimension) {
+        const ratio = Math.min(maxDimension / width, maxDimension / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      try {
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   isOpen,
   onClose,
@@ -59,15 +96,16 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   const [scanError, setScanError] = useState<string | null>(null);
   const [scannedResult, setScannedResult] = useState<ScannedReceiptData | null>(null);
 
-  // Form edit states (setelah di-scan, user tetap bisa mengoreksi jika perlu)
+  // Form edit states
   const [editedTitle, setEditedTitle] = useState<string>('');
   const [editedAmount, setEditedAmount] = useState<string>('');
   const [editedCategory, setEditedCategory] = useState<string>('Kebutuhan Sehari-hari');
   const [editedDate, setEditedDate] = useState<string>(toISODateString(new Date()));
 
-  // Live Camera states
+  // Live Camera states & Permissions
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
-  const [cameraError] = useState<string | null>(null);
+  const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied' | 'unsupported'>('idle');
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -85,8 +123,19 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       setScannedResult(null);
       setEditedTitle('');
       setEditedAmount('');
+      setCameraError(null);
+      setCameraPermissionStatus('idle');
     }
   }, [isOpen]);
+
+  // Attach MediaStream to mounted <video> element whenever live camera becomes active
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && streamRef.current) {
+      const video = videoRef.current;
+      video.srcObject = streamRef.current;
+      video.play().catch(() => {});
+    }
+  }, [isCameraActive]);
 
   // Handle stop camera
   const stopCamera = () => {
@@ -94,11 +143,68 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     setIsCameraActive(false);
   };
 
+  // Start Live Camera & Request Browser Permission
+  const startLiveCamera = async () => {
+    if (typeof window === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraPermissionStatus('unsupported');
+      setCameraError('Peramban Anda belum mendukung akses kamera langsung. Gunakan tombol Unggah Foto.');
+      return;
+    }
+
+    setCameraPermissionStatus('requesting');
+    setCameraError(null);
+
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1600 },
+            height: { ideal: 1200 },
+          },
+          audio: false,
+        });
+      } catch (constraintErr: any) {
+        if (constraintErr?.name === 'OverconstrainedError' || constraintErr?.name === 'TypeError') {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } else {
+          throw constraintErr;
+        }
+      }
+
+      streamRef.current = stream;
+      setCameraPermissionStatus('granted');
+      setIsCameraActive(true);
+    } catch (err: any) {
+      console.warn('[ReceiptScanner] Gagal memperoleh izin kamera:', err);
+      const rawMsg = String(err?.message || '').toLowerCase();
+      let msg = 'Akses kamera ditolak oleh perangkat atau peramban.';
+
+      if (rawMsg.includes('permissions policy') || rawMsg.includes('feature policy')) {
+        msg = 'Akses kamera masih dibatasi oleh bingkai pratinjau. Klik "Coba Minta Izin Lagi" atau buka langsung di tab Chrome penuh.';
+      } else if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        msg = 'Akses kamera ditolak. Silakan izinkan akses kamera pada setelan perangkat atau ikon kunci/izin di bilah alamat peramban Anda.';
+      } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+        msg = 'Perangkat kamera tidak ditemukan pada perangkat Anda. Gunakan opsi Unggah Foto.';
+      } else if (err?.name === 'NotReadableError') {
+        msg = 'Kamera sedang digunakan oleh aplikasi lain.';
+      }
+
+      setCameraPermissionStatus('denied');
+      setCameraError(msg);
+      setIsCameraActive(false);
+    }
+  };
+
   // Capture photo from live camera
-  const capturePhotoFromLiveCamera = () => {
+  const capturePhotoFromLiveCamera = async () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
@@ -107,10 +213,11 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
     stopCamera();
-    setImagePreview(dataUrl);
-    processReceiptImage(dataUrl, 'image/jpeg');
+    const compressed = await compressReceiptDataUrl(dataUrl);
+    setImagePreview(compressed);
+    processReceiptImage(compressed, 'image/jpeg');
   };
 
   // Handle selected file from input (camera or file gallery)
@@ -119,10 +226,11 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      setImagePreview(result);
-      processReceiptImage(result, file.type || 'image/jpeg');
+    reader.onload = async () => {
+      const rawResult = reader.result as string;
+      const compressed = await compressReceiptDataUrl(rawResult);
+      setImagePreview(compressed);
+      processReceiptImage(compressed, 'image/jpeg');
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -146,10 +254,20 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
         }),
       });
 
-      const json = await response.json();
+      const rawText = await response.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        throw new Error(
+          response.status === 413
+            ? 'Ukuran foto terlalu besar. Silakan foto ulang atau gunakan gambar yang lebih ringan.'
+            : `Server pemindai AI mengembalikan respons tidak valid (HTTP ${response.status}). Pastikan server aplikasi aktif.`
+        );
+      }
 
-      if (!response.ok || !json.success) {
-        throw new Error(json.error || 'Gagal memindai struk.');
+      if (!response.ok || !json?.success) {
+        throw new Error(json?.error || 'Gagal memindai struk dengan AI.');
       }
 
       const data: ScannedReceiptData = json.data;
@@ -169,7 +287,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
     } catch (err: any) {
       console.error('Receipt Scan Error:', err);
       setScanError(
-        err.message || 'Gagal menganalisis struk. Pastikan foto struk terlihat jelas dan terang.'
+        err?.message || 'Gagal menganalisis struk. Pastikan foto struk terlihat jelas dan terang.'
       );
     } finally {
       setIsScanning(false);
@@ -180,12 +298,12 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   const handleSaveExpense = () => {
     const amountNum = parseFloat(editedAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      alert('Nominal pengeluaran harus berupa angka yang valid.');
+      setScanError('Nominal pengeluaran harus berupa angka yang valid dan lebih dari 0.');
       return;
     }
 
     if (!editedTitle.trim()) {
-      alert('Keterangan pengeluaran tidak boleh kosong.');
+      setScanError('Keterangan atau nama toko tidak boleh kosong.');
       return;
     }
 
@@ -284,10 +402,12 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
           </div>
 
           <button
+            type="button"
             onClick={() => {
               stopCamera();
               onClose();
             }}
+            aria-label="Tutup pemindai struk"
             className={`p-2 rounded-xl border transition-colors cursor-pointer ${
               isLight
                 ? 'border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-slate-100'
@@ -303,6 +423,76 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
           {/* 1. TAMPILAN AWAL: BELUM ADA FOTO & KAMERA BELUM AKTIF */}
           {!imagePreview && !isCameraActive && (
             <div className="space-y-4 text-center">
+              {/* KARTU IZIN KAMERA DIPERLUKAN (Serupa Izin Mikrofon) */}
+              {cameraPermissionStatus === 'denied' && (
+                <div
+                  className={`p-4 rounded-2xl border text-xs text-left space-y-3 ${
+                    isLight
+                      ? 'bg-amber-50 border-amber-200 text-amber-950'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5 font-bold">
+                    <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-black text-sm">Izin Kamera Diperlukan</h4>
+                      <p className="mt-1 font-semibold leading-relaxed">
+                        {cameraError || 'Perangkat atau peramban Anda belum mengizinkan akses kamera.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`p-3 rounded-xl text-[11px] font-semibold leading-relaxed ${
+                      isLight
+                        ? 'bg-white/80 border border-amber-200/60'
+                        : 'bg-black/20 border border-amber-500/20'
+                    }`}
+                  >
+                    💡 <strong>Cara Mengizinkan:</strong> Klik ikon gembok / perizinan situs di bilah alamat (URL bar) browser Anda, aktifkan <strong>Kamera (Camera)</strong>, lalu klik tombol coba lagi di bawah.
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={startLiveCamera}
+                      className="flex-1 py-2.5 px-4 rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition-colors cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Coba Minta Izin Lagi</span>
+                    </button>
+                    {typeof window !== 'undefined' && window.self !== window.top && (
+                      <a
+                        href={window.location.origin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`py-2.5 px-4 rounded-xl font-bold border transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+                          isLight
+                            ? 'bg-white hover:bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-white/10 hover:bg-white/15 text-amber-200 border-amber-500/30'
+                        }`}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        <span>Buka di Tab Chrome</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {cameraPermissionStatus === 'unsupported' && cameraError && (
+                <div
+                  className={`p-4 rounded-2xl border text-xs text-left flex items-start gap-2.5 ${
+                    isLight
+                      ? 'bg-rose-50 border-rose-200 text-rose-900'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                  }`}
+                >
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                  <span className="font-semibold leading-relaxed">{cameraError}</span>
+                </div>
+              )}
+
               <div
                 className={`border-2 border-dashed rounded-none p-6 sm:p-8 flex flex-col items-center justify-center gap-4 transition-all font-mono ${
                   isLight
@@ -329,19 +519,18 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                   </p>
                 </div>
 
-                {/* Tombol Opsi: Kamera HP / Galeri / Live Viewfinder */}
+                {/* Tombol Opsi: Kamera Langsung (Izin Kamera) & Unggah Foto / Kamera HP */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-md pt-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (cameraInputRef.current) {
-                        cameraInputRef.current.click();
-                      }
-                    }}
-                    className="p-3.5 rounded-none flex items-center justify-center gap-2 font-mono font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md bg-emerald-600 hover:bg-emerald-700 text-white active:scale-[0.99]"
+                    disabled={cameraPermissionStatus === 'requesting'}
+                    onClick={startLiveCamera}
+                    className="p-3.5 rounded-none flex items-center justify-center gap-2 font-mono font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md bg-emerald-600 hover:bg-emerald-700 text-white active:scale-[0.99] disabled:opacity-60"
                   >
-                    <Camera className="w-4 h-4 stroke-[2.5]" />
-                    <span>FOTO KAMERA</span>
+                    <Video className="w-4 h-4 stroke-[2.5]" />
+                    <span>
+                      {cameraPermissionStatus === 'requesting' ? 'MEMINTA IZIN...' : 'BUKA KAMERA'}
+                    </span>
                   </button>
 
                   <button
@@ -361,20 +550,23 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                     <span>UNGGAH FOTO</span>
                   </button>
                 </div>
-              </div>
 
-              {cameraError && (
-                <div
-                  className={`p-3 rounded-2xl border text-xs font-medium text-left flex items-start gap-2.5 ${
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cameraInputRef.current) {
+                      cameraInputRef.current.click();
+                    }
+                  }}
+                  className={`text-[11px] font-semibold underline cursor-pointer transition-colors ${
                     isLight
-                      ? 'bg-amber-50 border-amber-300 text-amber-900'
-                      : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                      ? 'text-emerald-700 hover:text-emerald-900'
+                      : 'text-emerald-300/80 hover:text-emerald-200'
                   }`}
                 >
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{cameraError}</span>
-                </div>
-              )}
+                  Atau ambil foto lewat aplikasi kamera bawaan HP
+                </button>
+              </div>
             </div>
           )}
 
@@ -386,6 +578,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                   ref={videoRef}
                   autoPlay
                   playsInline
+                  muted
                   className="w-full h-full object-cover"
                 />
 
@@ -426,9 +619,11 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
           {/* 3. TAMPILAN PREVIEW FOTO & ANIMASI SCANNING */}
           {imagePreview && (
             <div className="space-y-4">
-              <div className={`relative rounded-2xl overflow-hidden border ${
-                isLight ? 'border-slate-200 bg-slate-100' : 'border-[#263449] bg-[#0A101D]'
-              } max-h-52 sm:max-h-60 flex items-center justify-center`}>
+              <div
+                className={`relative rounded-2xl overflow-hidden border ${
+                  isLight ? 'border-slate-200 bg-slate-100' : 'border-[#263449] bg-[#0A101D]'
+                } max-h-52 sm:max-h-60 flex items-center justify-center`}
+              >
                 <img
                   src={imagePreview}
                   alt="Foto Struk"
@@ -459,9 +654,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                     isLight ? 'text-slate-600' : 'text-white/60'
                   }`}
                 >
-                  {isScanning
-                    ? 'Memproses dengan Gemini AI...'
-                    : 'Foto struk berhasil dimuat.'}
+                  {isScanning ? 'Memproses dengan AI...' : 'Foto struk berhasil dimuat.'}
                 </span>
                 <button
                   type="button"
@@ -496,9 +689,20 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                     <span>Gagal membaca data struk otomatis:</span>
                   </div>
                   <p className="text-[11px] leading-relaxed">{scanError}</p>
-                  <p className="text-[11px] font-semibold">
-                    Anda tetap dapat mengisi atau menyesuaikan rincian pengeluaran pada formulir di bawah ini.
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <p className="text-[11px] font-semibold">
+                      Anda tetap dapat mengisi rincian pengeluaran secara manual di bawah.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={isScanning}
+                      onClick={() => processReceiptImage(imagePreview, 'image/jpeg')}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Pindai Ulang</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -510,11 +714,17 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
                     : 'bg-[#111827] border-emerald-500/30 text-white'
                 }`}
               >
-                <div className={`flex items-center justify-between pb-2 border-b-2 border-dashed ${
-                  isLight ? 'border-slate-300' : 'border-white/10'
-                }`}>
-                  <h4 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 text-emerald-700">
-                    <Check className="w-4 h-4 text-emerald-600 stroke-[3]" />
+                <div
+                  className={`flex items-center justify-between pb-2 border-b-2 border-dashed ${
+                    isLight ? 'border-slate-300' : 'border-white/10'
+                  }`}
+                >
+                  <h4
+                    className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                      isLight ? 'text-emerald-700' : 'text-emerald-400'
+                    }`}
+                  >
+                    <Check className="w-4 h-4 stroke-[3]" />
                     <span>[ DATA STRUK TERBACA ]</span>
                   </h4>
                   {scannedResult?.rawTotalText && (

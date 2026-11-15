@@ -16,7 +16,7 @@ createRoot(document.getElementById('root')!).render(
 if (typeof window !== 'undefined' && 'caches' in window) {
   caches.keys().then((keys) => {
     for (const key of keys) {
-      if (key !== 'journal-stream-pwa-v25') {
+      if (key !== 'ascend-journal-pwa-v26') {
         caches.delete(key);
       }
     }
@@ -25,7 +25,7 @@ if (typeof window !== 'undefined' && 'caches' in window) {
 
 // PWA Service Worker: Registrasi service worker untuk Web Push Notification & Offline PWA
 if ('serviceWorker' in navigator && typeof window !== 'undefined') {
-  window.addEventListener('load', () => {
+  const registerSW = () => {
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
@@ -34,5 +34,10 @@ if ('serviceWorker' in navigator && typeof window !== 'undefined') {
       .catch((err) => {
         console.warn('Service worker registration notice:', err);
       });
-  });
+  };
+  if (document.readyState === 'complete') {
+    registerSW();
+  } else {
+    window.addEventListener('load', registerSW, { once: true });
+  }
 }

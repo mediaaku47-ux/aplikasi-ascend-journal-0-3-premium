@@ -1,6 +1,6 @@
 // Utilitas Notifikasi Pengingat Perangkat (HP / Laptop Web Push Notification)
 // Mematuhi izin resmi browser/OS, mendukung pengingat agenda sebelum 22.00 dan pengingat jurnal
-import { Habit, Task } from '../types';
+import { Habit, Task, TargetItem } from '../types';
 
 export interface JournalDeadlineStatus {
   isApproaching: boolean;       // 20 menit sebelum 22:30 (antara 22:10 sampai 22:30)
@@ -20,6 +20,7 @@ export interface DeviceNotificationSettings {
   journalWarningMinutes: number;     // Menit peringatan sebelum batas (default 20 menit)
   habitReminders: boolean;           // Pengingat rutinitas kebiasaan harian
   habitReminderHour: number;         // Jam pengingat kebiasaan (default 20:00 WIB)
+  targetReminders: boolean;          // Pengingat target batas hari tertentu
 }
 
 const DEFAULT_NOTIFICATION_SETTINGS: DeviceNotificationSettings = {
@@ -31,6 +32,7 @@ const DEFAULT_NOTIFICATION_SETTINGS: DeviceNotificationSettings = {
   journalWarningMinutes: 20,
   habitReminders: true,
   habitReminderHour: 20, // Pukul 20:00 WIB
+  targetReminders: true,
 };
 
 const SETTINGS_STORAGE_KEY = 'ascend_device_notification_settings';
@@ -53,6 +55,19 @@ export function getNotificationPermissionStatus(): 'granted' | 'denied' | 'defau
  */
 export function isWebNotificationSupported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+/**
+ * Cek apakah pengguna memakai Safari iPhone/iPad di luar mode PWA (Home Screen)
+ */
+export function isIOSNotStandalone(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone =
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true;
+  return isIOS && !isStandalone;
 }
 
 /**
@@ -156,23 +171,26 @@ export async function sendDeviceNotification(
     ...options,
   };
 
-  // 1. Coba utamakan Service Worker (Wajib untuk HP Android / PWA mobile)
+  // 1. Coba utamakan Service Worker aktif (Wajib untuk HP Android / iOS PWA mobile & desktop tray)
   if ('serviceWorker' in navigator) {
     try {
-      let reg: ServiceWorkerRegistration | null = null;
-      try {
-        reg = await navigator.serviceWorker.getRegistration();
-        if (!reg) {
-          reg = await Promise.race([
-            navigator.serviceWorker.ready,
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000))
-          ]);
+      let reg: ServiceWorkerRegistration | null = (await navigator.serviceWorker.getRegistration()) || null;
+      if (!reg) {
+        try {
+          reg = await navigator.serviceWorker.register('/sw.js');
+        } catch {
+          reg = null;
         }
-      } catch {
-        reg = null;
+      }
+      if (!reg || !reg.active) {
+        const readyReg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+        ]);
+        if (readyReg) reg = readyReg;
       }
 
-      if (reg && typeof reg.showNotification === 'function') {
+      if (reg && reg.active && typeof reg.showNotification === 'function') {
         await reg.showNotification(title, notificationOptions);
         return true;
       }
@@ -181,7 +199,7 @@ export async function sendDeviceNotification(
         navigator.serviceWorker.controller.postMessage({
           type: 'SHOW_DEVICE_NOTIFICATION',
           title,
-          options: notificationOptions
+          options: notificationOptions,
         });
         return true;
       }
@@ -681,4 +699,166 @@ export async function checkAndTriggerMonthClosingDeviceNotification(
 
   return sent;
 }
+
+const formatDeadlineDateId = (isoDate: string): string => {
+  const parts = isoDate.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return isoDate;
+  const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+  return new Intl.DateTimeFormat('id-ID', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(dateObj);
+};
+
+const calcRemainingDaysIso = (fromIso: string, toIso?: string): number | null => {
+  if (!toIso) return null;
+  const fromParts = fromIso.split('-').map(Number);
+  const toParts = toIso.split('-').map(Number);
+  if (fromParts.length !== 3 || toParts.length !== 3) return null;
+  if (fromParts.some(Number.isNaN) || toParts.some(Number.isNaN)) return null;
+  const a = new Date(fromParts[0], fromParts[1] - 1, fromParts[2]);
+  const b = new Date(toParts[0], toParts[1] - 1, toParts[2]);
+  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+};
+
+/**
+ * Pengingat Target:
+ * - Jika reminderMode === 'daily': mengingatkan setiap hari pada jam yang dipilih (reminderTime) sampai batas hari target.
+ * - Jika reminderMode === 'deadline_only': hanya mengingatkan saat hari batas target selesai tiba (deadlineDate === today).
+ */
+export function checkAllTargetsForReminders(targets: TargetItem[]): void {
+  if (!targets || !Array.isArray(targets) || targets.length === 0) return;
+  const settings = getNotificationSettings();
+  if (!settings.enabled || settings.targetReminders === false) return;
+  if (!isWebNotificationSupported() || Notification.permission !== 'granted') return;
+
+  const now = new Date();
+  const todayStr = getTodayDateString(now);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  targets.forEach((target) => {
+    if (target.completed) return;
+
+    const isDoneToday =
+      Array.isArray(target.completedDates) && target.completedDates.includes(todayStr);
+
+    if (target.reminderMode === 'daily') {
+      if (isDoneToday) return;
+      if (target.deadlineDate && todayStr > target.deadlineDate) return;
+
+      const timeStr = target.reminderTime || '09:00';
+      const [hhRaw, mmRaw] = timeStr.split(':').map(Number);
+      const hh = Number.isNaN(hhRaw) ? 9 : hhRaw;
+      const mm = Number.isNaN(mmRaw) ? 0 : mmRaw;
+      const targetMinutes = hh * 60 + mm;
+
+      if (nowMinutes >= targetMinutes) {
+        const keyDaily = `ascend_target_notif_daily_${target.id}_${todayStr}`;
+        try {
+          if (localStorage.getItem(keyDaily) !== 'true') {
+            const deadlineLabel = target.deadlineDate ? formatDeadlineDateId(target.deadlineDate) : '';
+            const remainingDays = calcRemainingDaysIso(todayStr, target.deadlineDate);
+
+            let title = `🎯 Kamu Pasti Bisa! Target: ${target.title}`;
+            let body = '';
+
+            if (target.deadlineDate && remainingDays === 0) {
+              title = `⏰ Hari Ini Batas Target Kamu: ${target.title}`;
+              body = `Batas target kamu hari ini (${deadlineLabel}) dan kamu harus mencapainya! Kamu pasti bisa menyelesaikannya dengan hasil terbaik!`;
+            } else if (target.deadlineDate && remainingDays !== null && remainingDays > 0) {
+              body = `Batas target kamu ${deadlineLabel} dan kamu harus mencapainya, dan kamu akan diingatkan setiap hari pada jam ${timeStr} dalam ${remainingDays} hari ke depan agar kamu mencapai targetmu. Tetap semangat, langkah kecil hari ini sangat berarti!`;
+            } else {
+              body = `Pengingat harian pada jam ${timeStr} untuk target "${target.title}". Tetap semangat, kamu selangkah lebih dekat mencapai targetmu!`;
+            }
+
+            void sendDeviceNotification(title, {
+              body,
+              tag: `target-daily-${target.id}-${todayStr}`,
+            });
+            localStorage.setItem(keyDaily, 'true');
+          }
+        } catch {}
+      }
+      return;
+    }
+
+    if (target.reminderMode === 'deadline_only' && target.deadlineDate) {
+      if (todayStr === target.deadlineDate) {
+        const keyDeadline = `ascend_target_notif_deadline_${target.id}_${todayStr}`;
+        try {
+          if (localStorage.getItem(keyDeadline) !== 'true') {
+            const deadlineLabel = formatDeadlineDateId(target.deadlineDate);
+            void sendDeviceNotification(`⏰ Hari Batas Target Tiba: ${target.title}`, {
+              body: `Hari ini (${deadlineLabel}) adalah batas target kamu untuk "${target.title}" dan kamu harus mencapainya! Terus melangkah dengan yakin, kamu mampu menuntaskan targetmu hari ini!`,
+              tag: `target-deadline-${target.id}-${todayStr}`,
+            });
+            localStorage.setItem(keyDeadline, 'true');
+          }
+        } catch {}
+      }
+    }
+  });
+}
+
+/**
+ * Kirim notifikasi konfirmasi langsung ke HP / perangkat pengguna saat pengingat target disimpan
+ */
+export async function sendTargetConfirmationNotification(
+  targetTitle: string,
+  reminderMode: 'daily' | 'deadline_only',
+  reminderTime?: string,
+  deadlineDate?: string
+): Promise<boolean> {
+  if (!isWebNotificationSupported() || Notification.permission !== 'granted') {
+    return false;
+  }
+  saveNotificationSettings({ enabled: true, targetReminders: true });
+
+  const todayStr = getTodayDateString();
+  const deadlineLabel = deadlineDate ? formatDeadlineDateId(deadlineDate) : 'sesuai jadwal';
+  const remainingDays = calcRemainingDaysIso(todayStr, deadlineDate);
+  const jam = reminderTime || '09:00';
+
+  let title = '';
+  let body = '';
+
+  if (reminderMode === 'daily') {
+    title = `🔔 Semangat! Target Kamu Disimpan: ${targetTitle}`;
+    if (remainingDays !== null && remainingDays > 0) {
+      body = `Batas target kamu ${deadlineLabel} dan kamu harus mencapainya, dan kamu akan diingatkan setiap hari pada jam ${jam} dalam ${remainingDays} hari ke depan agar kamu mencapai targetmu. Kamu pasti bisa!`;
+    } else {
+      body = `Batas target kamu ${deadlineLabel} dan kamu harus mencapainya, dan kamu akan diingatkan pada jam ${jam} agar kamu mencapai targetmu. Kamu pasti bisa!`;
+    }
+  } else {
+    title = `🔔 Target Disimpan! Kamu Pasti Bisa: ${targetTitle}`;
+    body = `Batas target kamu ${deadlineLabel} dan kamu harus mencapainya, dan nanti kamu akan diingatkan ketika hari selesai target. Tetap fokus dan percaya pada prosesmu!`;
+  }
+
+  return sendDeviceNotification(title, {
+    body,
+    tag: `target-confirm-${Date.now()}`,
+  });
+}
+
+/**
+ * Kirim notifikasi uji coba pengingat target ke HP / perangkat pengguna
+ */
+export async function sendTargetTestNotification(sampleTitle?: string): Promise<boolean> {
+  const perm = getNotificationPermissionStatus();
+  if (perm !== 'granted') {
+    const requested = await requestNotificationPermission();
+    if (requested !== 'granted') return false;
+  }
+  saveNotificationSettings({ enabled: true, targetReminders: true });
+  return sendDeviceNotification('🔔 Notifikasi Target HP & Perangkat Aktif!', {
+    body: sampleTitle
+      ? `Siap menyemangatimu! Pengingat untuk "${sampleTitle}" akan muncul langsung di perangkatmu agar kamu mencapai targetmu.`
+      : 'Notifikasi perangkat aktif! Setiap pengingat target siap menyemangatimu langsung di HP atau komputermu.',
+    tag: `target-test-${Date.now()}`,
+  });
+}
+
+
 

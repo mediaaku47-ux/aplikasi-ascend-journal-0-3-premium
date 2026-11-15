@@ -7,7 +7,8 @@ import {
   AlertCircle, 
   Sparkles, 
   RefreshCw,
-  FileText
+  FileText,
+  ExternalLink
 } from 'lucide-react';
 import { 
   VoiceRecorderController, 
@@ -187,14 +188,31 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
                 💡 <strong>Cara Mengizinkan:</strong> Klik ikon gembok / perizinan situs di bilah alamat (URL bar) browser Anda, aktifkan <strong>Mikrofon (Microphone)</strong>, lalu klik tombol coba lagi di bawah.
               </div>
 
-              <button
-                type="button"
-                onClick={handleStart}
-                className="w-full py-2.5 px-4 rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition-colors cursor-pointer flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Coba Minta Izin Lagi</span>
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  className="flex-1 py-2.5 px-4 rounded-xl font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Coba Minta Izin Lagi</span>
+                </button>
+                {typeof window !== 'undefined' && window.self !== window.top && (
+                  <a
+                    href={window.location.origin}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`py-2.5 px-4 rounded-xl font-bold border transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+                      isLight
+                        ? 'bg-white hover:bg-amber-100 text-amber-900 border-amber-300'
+                        : 'bg-white/10 hover:bg-white/15 text-amber-200 border-amber-500/30'
+                    }`}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Buka di Tab Chrome</span>
+                  </a>
+                )}
+              </div>
             </div>
           )}
 

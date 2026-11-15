@@ -10,7 +10,8 @@ import {
   Moon,
   ChevronLeft,
   ChevronRight,
-  RotateCcw
+  RotateCcw,
+  Star
 } from 'lucide-react';
 import { MONTH_NAMES_ID, getDaysInMonth, getYearOptions } from '../../utils/dateUtils';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
@@ -44,6 +45,7 @@ interface SettingsViewProps {
   onLogout?: () => void;
   onOpenProfile?: () => void;
   onOpenHelp?: () => void;
+  onOpenFeedback?: () => void;
   onNavigateToDashboard?: () => void;
   onShowToast?: (msg: string) => void;
   theme?: 'dark' | 'light';
@@ -66,6 +68,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onLogout,
   onOpenProfile,
   onOpenHelp,
+  onOpenFeedback,
   onNavigateToDashboard,
   onShowToast,
   theme = 'light',
@@ -94,13 +97,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
   const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders;
+  const isTargetNotifActive = notifSettings.enabled && notifSettings.targetReminders !== false;
 
   const handleToggleHabitNotification = () => {
     const nextVal = !isHabitNotifActive;
     const updated = {
       ...notifSettings,
-      enabled: nextVal,
+      enabled: nextVal || isTargetNotifActive,
       habitReminders: nextVal,
+    };
+    const saved = saveNotificationSettings(updated);
+    setNotifSettings(saved);
+  };
+
+  const handleToggleTargetNotification = () => {
+    const nextVal = !isTargetNotifActive;
+    const updated = {
+      ...notifSettings,
+      enabled: nextVal || isHabitNotifActive,
+      targetReminders: nextVal,
     };
     const saved = saveNotificationSettings(updated);
     setNotifSettings(saved);
@@ -562,7 +577,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             )}
 
-            {/* SATU SAKELAR TUNGGAL RESMI */}
+            {/* SAKELAR PENGINGAT KEBIASAAN */}
             <div className={`flex items-center justify-between gap-3 py-3 border-b ${
               isLight ? 'border-slate-100' : 'border-white/5'
             }`}>
@@ -594,6 +609,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             </div>
 
+            {/* SAKELAR PENGINGAT TARGET */}
+            <div className={`flex items-center justify-between gap-3 py-3 border-b ${
+              isLight ? 'border-slate-100' : 'border-white/5'
+            }`}>
+              <div className="flex-1 min-w-0 pr-2">
+                <div className="flex items-center gap-2">
+                  <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Pengingat Target &amp; Batas Hari
+                  </h4>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                    isTargetNotifActive
+                      ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {isTargetNotifActive ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleTargetNotification}
+                aria-label="Aktifkan pengingat target"
+                className={`w-12 h-6 min-w-[48px] max-w-[48px] shrink-0 rounded-full transition-colors relative cursor-pointer focus:outline-none ${
+                  isTargetNotifActive ? 'bg-teal-500' : (isLight ? 'bg-slate-300' : 'bg-white/20')
+                }`}
+              >
+                <span className={`w-5 h-5 rounded-full bg-white shadow-sm absolute top-0.5 left-0.5 transition-transform duration-200 ${
+                  isTargetNotifActive ? 'translate-x-6' : 'translate-x-0'
+                }`} />
+              </button>
+            </div>
+
             {/* Tombol Uji Notifikasi & Status Feedback */}
             <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="text-xs">
@@ -619,6 +666,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </AccordionSection>
+
+        {/* BINTANG & SARAN PENGALAMAN */}
+        {onOpenFeedback && (
+          <AccordionSection
+            id="feedback"
+            isOpen={openSection === 'feedback'}
+            onToggle={() => toggleSection('feedback')}
+            title="Bintang & Saran Pengalaman"
+            badge={
+              userProfile.feedback?.rating ? (
+                <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-bold ${
+                  isLight ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
+                }`}>
+                  {userProfile.feedback.rating} / 5 Bintang
+                </span>
+              ) : undefined
+            }
+            isLight={isLight}
+          >
+            <div className="space-y-3 pt-1">
+              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
+                {userProfile.feedback?.submittedAt
+                  ? 'Terima kasih telah memberikan penilaian. Anda dapat memperbarui bintang atau saran pengalaman kapan saja di sini.'
+                  : 'Bagikan penilaian bintang dan saran Anda untuk membantu meningkatkan kualitas Ascend Journal.'}
+              </p>
+              <button
+                type="button"
+                onClick={onOpenFeedback}
+                className={`w-full text-xs p-3.5 rounded-2xl flex items-center justify-center gap-2 font-semibold cursor-pointer border transition-all ${
+                  isLight
+                    ? 'text-amber-900 bg-amber-50 hover:bg-amber-100 border-amber-200'
+                    : 'text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30'
+                }`}
+              >
+                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                <span>
+                  {userProfile.feedback?.submittedAt ? 'Ubah Bintang & Saran Pengalaman' : 'Beri Bintang & Saran Pengalaman'}
+                </span>
+              </button>
+            </div>
+          </AccordionSection>
+        )}
 
         {/* 6. RESET DATA */}
         <AccordionSection

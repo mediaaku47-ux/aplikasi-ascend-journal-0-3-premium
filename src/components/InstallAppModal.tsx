@@ -19,8 +19,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
 
   // Clean URL without iframe query params
   const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const shortUrl = 'tinyurl.com/272ruhox';
-  const fullShortUrl = 'https://tinyurl.com/272ruhox';
+  const installUrl = appUrl ? `${appUrl}/?action=install` : '/?action=install';
 
   const handleCopyLink = () => {
     if (appUrl) {
@@ -31,21 +30,19 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
   };
 
   const handleCopyShortLink = () => {
-    navigator.clipboard.writeText(fullShortUrl);
-    setCopiedShort(true);
-    setTimeout(() => setCopiedShort(false), 2500);
+    if (installUrl) {
+      navigator.clipboard.writeText(installUrl);
+      setCopiedShort(true);
+      setTimeout(() => setCopiedShort(false), 2500);
+    }
   };
 
-  const handleWhatsAppShare = () => {
-    const text = encodeURIComponent(`Buka aplikasi JournalStream: ${fullShortUrl}`);
-    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank', 'noopener,noreferrer');
-  };
+  const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`Buka & pasang aplikasi Ascend Journal: ${installUrl}`)}`;
 
   const handleNativeInstall = async () => {
     if (isInstallable) {
       await install();
     } else {
-      // Direct navigation to clean origin in the same browser context or show guide
       setDeviceTab('laptop');
     }
   };
@@ -63,9 +60,6 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
             <div>
               <h3 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                 <span>Pasang Aplikasi</span>
-                <span className="text-[10px] bg-sky-500/20 border border-sky-500/40 text-sky-300 px-2 py-0.5 rounded-full font-mono">
-                  PWA
-                </span>
               </h3>
               <p className="text-xs text-white/50">Dapat diinstal di Laptop, HP Android, &amp; iPhone</p>
             </div>
@@ -79,20 +73,17 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
           </button>
         </div>
 
-        {/* Link Pendek Paling Mudah Ditulis */}
+        {/* Tautan Instalasi Langsung */}
         <div className="my-4 p-4 rounded-2xl bg-gradient-to-r from-sky-500/15 via-indigo-500/10 to-transparent border border-sky-500/30 space-y-3">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-xs font-bold text-sky-300">
-              <Globe className="w-4 h-4 text-sky-400" /> Tautan Pendek (Sangat Mudah Ditulis):
-            </span>
-            <span className="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-full font-mono font-bold">
-              Mudah Diketik
+              <Globe className="w-4 h-4 text-sky-400" /> Tautan Instalasi Resmi:
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex-1 px-3 py-2.5 rounded-xl bg-black/60 border border-sky-500/30 text-sm font-mono font-bold text-teal-300 tracking-wide select-all">
-              {shortUrl}
+            <div className="flex-1 px-3 py-2.5 rounded-xl bg-black/60 border border-sky-500/30 text-xs font-mono font-semibold text-teal-300 truncate select-all">
+              {installUrl}
             </div>
             <button
               onClick={handleCopyShortLink}
@@ -109,13 +100,15 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
 
           {/* Tombol Bagikan WhatsApp & Tampilkan QR Code */}
           <div className="grid grid-cols-2 gap-2 pt-1">
-            <button
-              onClick={handleWhatsAppShare}
+            <a
+              href={whatsappShareUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
             >
               <MessageCircle className="w-3.5 h-3.5" />
               <span>Kirim ke WhatsApp</span>
-            </button>
+            </a>
             <button
               onClick={() => setShowQR(!showQR)}
               className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white/90 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
@@ -130,14 +123,14 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
             <div className="pt-2 flex flex-col items-center justify-center p-4 bg-black/60 rounded-2xl border border-white/10 text-center animate-in fade-in duration-200">
               <div className="p-2 bg-white rounded-2xl shadow-lg mb-2">
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullShortUrl)}&margin=1`}
-                  alt="QR Code JournalStream"
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(installUrl)}&margin=1`}
+                  alt="QR Code Ascend Journal"
                   className="w-40 h-40 object-contain"
                   loading="lazy"
                 />
               </div>
               <p className="text-xs text-white/80 font-medium">Arahkan kamera HP Anda ke kode QR di atas</p>
-              <p className="text-[11px] text-white/50">Tautan akan otomatis terbuka di browser Chrome HP Anda tanpa mengetik.</p>
+              <p className="text-[11px] text-white/50">Tautan akan otomatis terbuka di browser Chrome HP Anda.</p>
             </div>
           )}
         </div>
@@ -246,7 +239,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
                   <strong>Di Google Chrome:</strong> Klik ikon monitor dengan panah ke bawah (<Download className="w-3 h-3 inline text-sky-400" />) di ujung kanan bilah alamat (URL bar) → klik <strong>"Pasang" (Install)</strong>.
                 </li>
                 <li>
-                  <strong>Di Microsoft Edge:</strong> Klik ikon aplikasi/monitor kecil di ujung kanan bilah alamat atau klik menu titik tiga (⋯) pojok kanan atas → pilih <strong>"Aplikasi" (Apps)</strong> → klik <strong>"Instal JournalStream sebagai aplikasi"</strong>.
+                  <strong>Di Microsoft Edge:</strong> Klik ikon aplikasi/monitor kecil di ujung kanan bilah alamat atau klik menu titik tiga (⋯) pojok kanan atas → pilih <strong>"Aplikasi" (Apps)</strong> → klik <strong>"Instal Ascend Journal sebagai aplikasi"</strong>.
                 </li>
                 <li>
                   Aplikasi akan langsung muncul di desktop dan taskbar laptop Anda, siap ditekan dan dibuka kapan saja tanpa browser bar!

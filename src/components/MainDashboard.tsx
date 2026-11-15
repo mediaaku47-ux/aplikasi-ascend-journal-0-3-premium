@@ -42,6 +42,7 @@ import { NotificationsView } from './Views/NotificationsView';
 import { useDeviceNotifications } from '../hooks/useDeviceNotifications';
 import {
   checkAllHabitsForDeadlineReminders,
+  checkAllTargetsForReminders,
   checkAndTriggerMonthClosingDeviceNotification,
 } from '../utils/notifications';
 import { TransactionSuccessModal } from './TransactionSuccessModal';
@@ -292,7 +293,37 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   const [targets, setTargets] = useState<TargetItem[]>(() => {
     try {
       const saved = localStorage.getItem('journalstream_targets');
-      return saved ? JSON.parse(saved) : [];
+      const parsed: TargetItem[] = saved ? JSON.parse(saved) : [];
+      const extrasRaw = localStorage.getItem('journalstream_target_extras');
+      const extras: Record<
+        string,
+        {
+          subtasks?: TargetItem['subtasks'];
+          streakDays?: number;
+          lastCompletedDate?: string;
+          completedDates?: string[];
+          celebratedWeeks?: string[];
+          deadlineDate?: string;
+          reminderMode?: TargetItem['reminderMode'];
+          reminderTime?: string;
+        }
+      > = extrasRaw ? JSON.parse(extrasRaw) : {};
+      const todayIso = toISODateString(new Date());
+      return parsed.map((t) => {
+        const ext = extras[t.id];
+        const mergedDates = t.completedDates ?? ext?.completedDates ?? (t.completed ? [t.lastCompletedDate || todayIso] : []);
+        return {
+          ...t,
+          subtasks: t.subtasks ?? ext?.subtasks,
+          streakDays: t.streakDays ?? ext?.streakDays,
+          lastCompletedDate: t.lastCompletedDate ?? ext?.lastCompletedDate,
+          completedDates: mergedDates,
+          celebratedWeeks: t.celebratedWeeks ?? ext?.celebratedWeeks,
+          deadlineDate: t.deadlineDate ?? ext?.deadlineDate,
+          reminderMode: t.reminderMode ?? ext?.reminderMode,
+          reminderTime: t.reminderTime ?? ext?.reminderTime,
+        };
+      });
     } catch {
       return [];
     }
@@ -437,32 +468,61 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     };
   }, [userProfile?.avatarUrl]);
 
-  // Evaluasi Pengalaman 24 Jam: Munculkan dialog rating bintang & saran setelah 24 jam pertama dihitung dari awal membuat akun
+  // Evaluasi Pengalaman 24 Jam: Munculkan dialog rating bintang & saran HANYA SEKALI setelah 24 jam pertama; selanjutnya hanya dapat dibuka manual lewat Pengaturan
   useEffect(() => {
-    let accountCreatedAt = 
-      userProfile.accountCreatedAt || 
-      localStorage.getItem('ascend_account_created_at') || 
+    if (isLoadingFromSupabase) return;
+
+    let accountCreatedAt =
+      userProfile.accountCreatedAt ||
+      localStorage.getItem('ascend_account_created_at') ||
       (currentUser?.created_at && currentUser.created_at !== '2026-01-01T00:00:00.000Z' ? currentUser.created_at : null);
-    
+
     // Pastikan jika belum ada atau menggunakan placeholder dummy masa lalu, set ke waktu saat ini
     if (!accountCreatedAt || accountCreatedAt === '2026-01-01T00:00:00.000Z') {
       accountCreatedAt = new Date().toISOString();
-      localStorage.setItem('ascend_account_created_at', accountCreatedAt);
+      try {
+        localStorage.setItem('ascend_account_created_at', accountCreatedAt);
+      } catch {}
       setUserProfile((prev) => ({ ...prev, accountCreatedAt }));
     }
 
     const elapsedMs = Date.now() - new Date(accountCreatedAt).getTime();
     const is24HoursPassed = elapsedMs >= 24 * 60 * 60 * 1000;
-    const hasSubmittedFeedback = Boolean(userProfile.feedback?.submittedAt);
-    const hasDismissedSession = sessionStorage.getItem('journalstream_feedback_dismissed');
 
-    if (is24HoursPassed && !hasSubmittedFeedback && !hasDismissedSession) {
+    const hasSubmittedFeedback = (() => {
+      if (userProfile.feedback?.submittedAt) return true;
+      try {
+        return Boolean(localStorage.getItem('journalstream_app_feedback'));
+      } catch {
+        return false;
+      }
+    })();
+
+    const hasAlreadyShown24h = (() => {
+      try {
+        if (localStorage.getItem('ascend_feedback_24h_shown') === 'true') return true;
+        if (currentUser?.id && localStorage.getItem(`ascend_feedback_24h_shown_${currentUser.id}`) === 'true') return true;
+        if (sessionStorage.getItem('journalstream_feedback_dismissed') === 'true') return true;
+        return false;
+      } catch {
+        return false;
+      }
+    })();
+
+    if (is24HoursPassed && !hasSubmittedFeedback && !hasAlreadyShown24h) {
       const timer = setTimeout(() => {
+        try {
+          localStorage.setItem('ascend_feedback_24h_shown', 'true');
+          if (currentUser?.id) {
+            localStorage.setItem(`ascend_feedback_24h_shown_${currentUser.id}`, 'true');
+          }
+          sessionStorage.setItem('journalstream_feedback_dismissed', 'true');
+        } catch {}
         setIsFeedbackModalOpen(true);
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [userProfile.accountCreatedAt, userProfile.feedback?.submittedAt, currentUser?.created_at]);
+  }, [isLoadingFromSupabase, userProfile.accountCreatedAt, userProfile.feedback?.submittedAt, currentUser?.created_at, currentUser?.id]);
 
   // Backup cache ke LocalStorage hanya setelah data dari Supabase selesai dimuat
   useEffect(() => {
@@ -485,6 +545,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   useEffect(() => {
     const runCheck = () => {
       checkAllHabitsForDeadlineReminders(habits);
+      checkAllTargetsForReminders(targets);
       void checkAndTriggerMonthClosingDeviceNotification(
         userProfile.monthName,
         userProfile.monthIndex,
@@ -514,7 +575,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [habits, tasks, userProfile.monthName, userProfile.monthIndex, userProfile.year]);
+  }, [habits, targets, tasks, userProfile.monthName, userProfile.monthIndex, userProfile.year]);
 
   useEffect(() => {
     if (isLoadingFromSupabase) return;
@@ -539,6 +600,45 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   useEffect(() => {
     if (isLoadingFromSupabase) return;
     localStorage.setItem('journalstream_targets', JSON.stringify(targets));
+    try {
+      const extras: Record<
+        string,
+        {
+          subtasks?: TargetItem['subtasks'];
+          streakDays?: number;
+          lastCompletedDate?: string;
+          completedDates?: string[];
+          celebratedWeeks?: string[];
+          deadlineDate?: string;
+          reminderMode?: TargetItem['reminderMode'];
+          reminderTime?: string;
+        }
+      > = {};
+      targets.forEach((t) => {
+        if (
+          (t.subtasks && t.subtasks.length > 0) ||
+          (t.streakDays && t.streakDays > 0) ||
+          t.lastCompletedDate ||
+          (t.completedDates && t.completedDates.length > 0) ||
+          (t.celebratedWeeks && t.celebratedWeeks.length > 0) ||
+          t.deadlineDate ||
+          t.reminderMode ||
+          t.reminderTime
+        ) {
+          extras[t.id] = {
+            subtasks: t.subtasks,
+            streakDays: t.streakDays,
+            lastCompletedDate: t.lastCompletedDate,
+            completedDates: t.completedDates,
+            celebratedWeeks: t.celebratedWeeks,
+            deadlineDate: t.deadlineDate,
+            reminderMode: t.reminderMode,
+            reminderTime: t.reminderTime,
+          };
+        }
+      });
+      localStorage.setItem('journalstream_target_extras', JSON.stringify(extras));
+    } catch {}
   }, [targets, isLoadingFromSupabase]);
 
   const handleResetToCleanState = () => {
@@ -564,6 +664,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     localStorage.removeItem('journalstream_transactions');
     localStorage.removeItem('journalstream_quick_notes');
     localStorage.removeItem('journalstream_targets');
+    localStorage.removeItem('journalstream_target_extras');
     localStorage.removeItem('journalstream_total_balance');
     localStorage.removeItem('journalstream_savings_balance');
   };
@@ -608,7 +709,58 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     }
     if (data.targets !== undefined) {
       if (sourceTable !== 'targets' || now - lastMutationTimeRef.current.targets > MUTATION_PROTECT_MS) {
-        setTargets(data.targets);
+        try {
+          const extrasRaw = localStorage.getItem('journalstream_target_extras');
+          const extras: Record<
+            string,
+            {
+              subtasks?: TargetItem['subtasks'];
+              streakDays?: number;
+              lastCompletedDate?: string;
+              completedDates?: string[];
+              celebratedWeeks?: string[];
+              deadlineDate?: string;
+              reminderMode?: TargetItem['reminderMode'];
+              reminderTime?: string;
+            }
+          > = extrasRaw ? JSON.parse(extrasRaw) : {};
+          const todayIso = toISODateString(new Date());
+          setTargets(
+            data.targets.map((t) => {
+              const ext = extras[t.id];
+              const completedDates =
+                ext?.completedDates ?? t.completedDates ?? (t.completed ? [ext?.lastCompletedDate || todayIso] : []);
+              if (!ext) return { ...t, completedDates };
+              const subtasks = ext.subtasks;
+              const extraMeta = {
+                streakDays: ext.streakDays ?? t.streakDays,
+                lastCompletedDate: ext.lastCompletedDate ?? t.lastCompletedDate,
+                completedDates,
+                celebratedWeeks: ext.celebratedWeeks ?? t.celebratedWeeks,
+                deadlineDate: ext.deadlineDate ?? t.deadlineDate,
+                reminderMode: ext.reminderMode ?? t.reminderMode,
+                reminderTime: ext.reminderTime ?? t.reminderTime,
+              };
+              if (subtasks && subtasks.length > 0) {
+                const doneCount = subtasks.filter((s) => s.completed).length;
+                return {
+                  ...t,
+                  ...extraMeta,
+                  subtasks,
+                  targetCount: subtasks.length,
+                  currentCount: doneCount,
+                  completed: doneCount === subtasks.length,
+                };
+              }
+              return {
+                ...t,
+                ...extraMeta,
+              };
+            })
+          );
+        } catch {
+          setTargets(data.targets);
+        }
       }
     }
     if (data.userProfile) {
@@ -665,7 +817,58 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
           })));
         }
         if (cloudData.targets !== undefined) {
-          setTargets(cloudData.targets);
+          try {
+            const extrasRaw = localStorage.getItem('journalstream_target_extras');
+            const extras: Record<
+              string,
+              {
+                subtasks?: TargetItem['subtasks'];
+                streakDays?: number;
+                lastCompletedDate?: string;
+                completedDates?: string[];
+                celebratedWeeks?: string[];
+                deadlineDate?: string;
+                reminderMode?: TargetItem['reminderMode'];
+                reminderTime?: string;
+              }
+            > = extrasRaw ? JSON.parse(extrasRaw) : {};
+            const todayIso = toISODateString(new Date());
+            setTargets(
+              cloudData.targets.map((t) => {
+                const ext = extras[t.id];
+                const completedDates =
+                  ext?.completedDates ?? t.completedDates ?? (t.completed ? [ext?.lastCompletedDate || todayIso] : []);
+                if (!ext) return { ...t, completedDates };
+                const subtasks = ext.subtasks;
+                const extraMeta = {
+                  streakDays: ext.streakDays ?? t.streakDays,
+                  lastCompletedDate: ext.lastCompletedDate ?? t.lastCompletedDate,
+                  completedDates,
+                  celebratedWeeks: ext.celebratedWeeks ?? t.celebratedWeeks,
+                  deadlineDate: ext.deadlineDate ?? t.deadlineDate,
+                  reminderMode: ext.reminderMode ?? t.reminderMode,
+                  reminderTime: ext.reminderTime ?? t.reminderTime,
+                };
+                if (subtasks && subtasks.length > 0) {
+                  const doneCount = subtasks.filter((s) => s.completed).length;
+                  return {
+                    ...t,
+                    ...extraMeta,
+                    subtasks,
+                    targetCount: subtasks.length,
+                    currentCount: doneCount,
+                    completed: doneCount === subtasks.length,
+                  };
+                }
+                return {
+                  ...t,
+                  ...extraMeta,
+                };
+              })
+            );
+          } catch {
+            setTargets(cloudData.targets);
+          }
         }
         if (cloudData.userProfile) {
           setUserProfile((prev) => {
@@ -726,6 +929,9 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             showToast('Ada pembaruan pengumuman aplikasi!');
             return;
           }
+          if (table === 'targets' && Date.now() - lastMutationTimeRef.current.targets <= 4500) {
+            return;
+          }
           const cloudData = await dbService.fetchAllUserData(currentUser.id);
           if (cloudData) {
             handleApplyCloudData(cloudData, table);
@@ -754,6 +960,9 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setTargets((prevTargets) => {
       let hasChanged = false;
       const updated = prevTargets.map((target) => {
+        if (target.subtasks && target.subtasks.length > 0) {
+          return target;
+        }
         if (!target.isManual && (target.autoTrack === 'today_tasks' || (target.autoTrack as string) === 'daily_tasks')) {
           if (target.currentCount !== doneTasksToday) {
             hasChanged = true;
@@ -790,22 +999,72 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     );
   }, [tasks, habits, userProfile.streakDays, userProfile.selectedDay, realToday.day, targets]);
 
+  const applyTargetCompletionStreak = (target: TargetItem, willBeCompleted: boolean): Pick<TargetItem, 'streakDays' | 'lastCompletedDate'> => {
+    const todayIso = toISODateString(new Date());
+    const yesterdayIso = toISODateString(new Date(Date.now() - 86400000));
+    const currentStreak = target.streakDays || 0;
+
+    if (willBeCompleted) {
+      if (target.lastCompletedDate === todayIso) {
+        return { streakDays: Math.max(1, currentStreak), lastCompletedDate: todayIso };
+      }
+      const nextStreak = target.lastCompletedDate === yesterdayIso ? currentStreak + 1 : currentStreak > 0 && !target.lastCompletedDate ? currentStreak + 1 : 1;
+      return { streakDays: nextStreak, lastCompletedDate: todayIso };
+    }
+
+    if (target.lastCompletedDate === todayIso) {
+      return { streakDays: Math.max(0, currentStreak - 1), lastCompletedDate: undefined };
+    }
+    return { streakDays: currentStreak, lastCompletedDate: target.lastCompletedDate };
+  };
+
   const handleToggleTarget = (id: string) => {
+    lastMutationTimeRef.current.targets = Date.now();
+    const todayIso = toISODateString(new Date());
     setTargets((prev) =>
       prev.map((t) => {
         if (t.id === id) {
-          const willBeCompleted = !t.completed;
+          const existingDates = Array.isArray(t.completedDates) ? t.completedDates : [];
+          const isDoneToday = existingDates.includes(todayIso) || Boolean(t.completed);
+          const willBeCompleted = !isDoneToday;
+          const nextCompletedDates = willBeCompleted
+            ? Array.from(new Set([...existingDates, todayIso]))
+            : existingDates.filter((d) => d !== todayIso);
+
           if (willBeCompleted) {
-            showToast(`🎉 Luar biasa! Target "${t.title}" berhasil tercapai! ✨`);
+            if (t.deadlineDate && todayIso < t.deadlineDate) {
+              showToast(`Wah ngeri! Target "${t.title}" tercapai lebih cepat! Kamu luar biasa!`);
+            } else if (t.deadlineDate && todayIso === t.deadlineDate) {
+              showToast(`Target "${t.title}" tercapai sesuai waktunya! Terus pertahankan semangatmu!`);
+            } else {
+              showToast(`Hebat! Target "${t.title}" berhasil dicapai.`);
+            }
           }
-          const updated = {
+          const streakPatch = applyTargetCompletionStreak(t, willBeCompleted);
+          const updatedSubtasks =
+            t.subtasks && t.subtasks.length > 0
+              ? t.subtasks.map((s) => ({ ...s, completed: willBeCompleted }))
+              : t.subtasks;
+          const updated: TargetItem = {
             ...t,
+            ...streakPatch,
+            subtasks: updatedSubtasks,
+            completedDates: nextCompletedDates,
             completed: willBeCompleted,
-            currentCount: willBeCompleted 
-              ? (t.currentCount >= t.targetCount ? t.currentCount : t.targetCount)
-              : t.currentCount,
+            currentCount:
+              updatedSubtasks && updatedSubtasks.length > 0
+                ? willBeCompleted
+                  ? updatedSubtasks.length
+                  : 0
+                : willBeCompleted
+                  ? t.currentCount >= t.targetCount
+                    ? t.currentCount
+                    : t.targetCount
+                  : t.currentCount,
           };
-          dbService.upsertTarget(currentUser.id, updated).catch(console.warn);
+          if (currentUser?.id) {
+            dbService.upsertTarget(currentUser.id, updated).catch(console.warn);
+          }
           return updated;
         }
         return t;
@@ -814,16 +1073,26 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   };
 
   const handleUpdateTargetCount = (id: string, newCount: number) => {
+    lastMutationTimeRef.current.targets = Date.now();
     const safeCount = Math.max(0, newCount);
     setTargets((prev) =>
       prev.map((t) => {
         if (t.id === id) {
-          const updated = {
+          const willBeCompleted = safeCount >= t.targetCount;
+          const streakPatch =
+            willBeCompleted && !t.completed
+              ? applyTargetCompletionStreak(t, true)
+              : { streakDays: t.streakDays, lastCompletedDate: t.lastCompletedDate };
+          const updated: TargetItem = {
             ...t,
+            ...streakPatch,
             currentCount: safeCount,
+            completed: t.completed && safeCount < t.targetCount ? false : willBeCompleted ? true : t.completed,
             isManual: true,
           };
-          dbService.upsertTarget(currentUser.id, updated).catch(console.warn);
+          if (currentUser?.id) {
+            dbService.upsertTarget(currentUser.id, updated).catch(console.warn);
+          }
           return updated;
         }
         return t;
@@ -832,19 +1101,84 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   };
 
   const handleAddTarget = (newTarget: Omit<TargetItem, 'id' | 'createdAt'>) => {
+    lastMutationTimeRef.current.targets = Date.now();
+    const todayIso = toISODateString(new Date());
     const item: TargetItem = {
       ...newTarget,
       id: 'target_' + Date.now(),
       createdAt: new Date().toISOString(),
+      streakDays: newTarget.completed ? 1 : 0,
+      lastCompletedDate: newTarget.completed ? todayIso : undefined,
+      completedDates: newTarget.completed ? [todayIso] : [],
     };
     setTargets((prev) => [item, ...prev]);
-    dbService.upsertTarget(currentUser.id, item).catch(console.warn);
+    if (currentUser?.id) {
+      dbService.upsertTarget(currentUser.id, item).catch(console.warn);
+    }
     showToast(`Target "${newTarget.title}" berhasil ditambahkan!`);
   };
 
   const handleDeleteTarget = (id: string) => {
+    lastMutationTimeRef.current.targets = Date.now();
     setTargets((prev) => prev.filter((t) => t.id !== id));
-    dbService.deleteTarget(currentUser.id, id).catch(console.warn);
+    if (currentUser?.id) {
+      dbService.deleteTarget(currentUser.id, id).catch(console.warn);
+    }
+  };
+
+  const handleToggleTargetSubTask = (targetId: string, subTaskId: string) => {
+    lastMutationTimeRef.current.targets = Date.now();
+    setTargets((prev) =>
+      prev.map((t) => {
+        if (t.id !== targetId || !t.subtasks) return t;
+        const nextSubtasks = t.subtasks.map((s) => (s.id === subTaskId ? { ...s, completed: !s.completed } : s));
+        const doneCount = nextSubtasks.filter((s) => s.completed).length;
+        const allDone = nextSubtasks.length > 0 && doneCount === nextSubtasks.length;
+        const streakPatch =
+          allDone !== Boolean(t.completed)
+            ? applyTargetCompletionStreak(t, allDone)
+            : { streakDays: t.streakDays, lastCompletedDate: t.lastCompletedDate };
+        if (allDone && !t.completed) {
+          showToast(`Semua sub-tugas "${t.title}" selesai!`);
+        }
+        const updated: TargetItem = {
+          ...t,
+          ...streakPatch,
+          subtasks: nextSubtasks,
+          targetCount: nextSubtasks.length,
+          currentCount: doneCount,
+          completed: allDone,
+          isManual: true,
+        };
+        if (currentUser?.id) {
+          dbService.upsertTarget(currentUser.id, updated).catch(console.warn);
+        }
+        return updated;
+      })
+    );
+  };
+
+  const handleDeleteTargetSubTask = (targetId: string, subTaskId: string) => {
+    lastMutationTimeRef.current.targets = Date.now();
+    setTargets((prev) =>
+      prev.map((t) => {
+        if (t.id !== targetId || !t.subtasks) return t;
+        const nextSubtasks = t.subtasks.filter((s) => s.id !== subTaskId);
+        const doneCount = nextSubtasks.filter((s) => s.completed).length;
+        const allDone = nextSubtasks.length > 0 && doneCount === nextSubtasks.length;
+        const updated: TargetItem = {
+          ...t,
+          subtasks: nextSubtasks,
+          targetCount: nextSubtasks.length > 0 ? nextSubtasks.length : Math.max(1, t.targetCount),
+          currentCount: nextSubtasks.length > 0 ? doneCount : t.currentCount,
+          completed: nextSubtasks.length > 0 ? allDone : false,
+        };
+        if (currentUser?.id) {
+          dbService.upsertTarget(currentUser.id, updated).catch(console.warn);
+        }
+        return updated;
+      })
+    );
   };
 
   const handleTabChange = (tab: NavTab) => {
@@ -1573,10 +1907,10 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               <TargetsView
                 targets={targets}
                 onToggleTarget={handleToggleTarget}
-                onUpdateTargetCount={handleUpdateTargetCount}
                 onAddTarget={handleAddTarget}
                 onDeleteTarget={handleDeleteTarget}
-                onOpenRoadmap={() => setIsRoadmapModalOpen(true)}
+                onToggleSubTask={handleToggleTargetSubTask}
+                onDeleteSubTask={handleDeleteTargetSubTask}
                 theme={theme}
               />
             </Suspense>
@@ -1705,6 +2039,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                 onLogout={onLogout}
                 onOpenProfile={() => handleTabChange('profile')}
                 onOpenHelp={() => setIsHelpOpen(true)}
+                onOpenFeedback={() => setIsFeedbackModalOpen(true)}
                 onNavigateToDashboard={() => handleTabChange('dashboard')}
                 onShowToast={showToast}
                 theme={theme}
@@ -1772,6 +2107,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             onLogout={onLogout}
             onOpenProfile={() => setIsProfileModalOpen(true)}
             onOpenHelp={() => setIsHelpOpen(true)}
+            onOpenFeedback={() => setIsFeedbackModalOpen(true)}
             theme={theme}
             onToggleTheme={toggleTheme}
           />
@@ -1801,7 +2137,13 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               isOpen={isFeedbackModalOpen}
               onClose={() => {
                 setIsFeedbackModalOpen(false);
-                sessionStorage.setItem('journalstream_feedback_dismissed', 'true');
+                try {
+                  localStorage.setItem('ascend_feedback_24h_shown', 'true');
+                  if (currentUser?.id) {
+                    localStorage.setItem(`ascend_feedback_24h_shown_${currentUser.id}`, 'true');
+                  }
+                  sessionStorage.setItem('journalstream_feedback_dismissed', 'true');
+                } catch {}
               }}
               initialFeedback={userProfile.feedback}
               is24HourTrigger={
@@ -1818,8 +2160,15 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                   feedback: newFeedback,
                 };
                 setUserProfile(updatedProfile);
-                localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
-                localStorage.setItem('journalstream_app_feedback', JSON.stringify(newFeedback));
+                try {
+                  localStorage.setItem('ascend_feedback_24h_shown', 'true');
+                  if (currentUser?.id) {
+                    localStorage.setItem(`ascend_feedback_24h_shown_${currentUser.id}`, 'true');
+                  }
+                  sessionStorage.setItem('journalstream_feedback_dismissed', 'true');
+                  localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+                  localStorage.setItem('journalstream_app_feedback', JSON.stringify(newFeedback));
+                } catch {}
                 if (currentUser?.id) {
                   dbService.syncProfile(currentUser.id, updatedProfile).catch(console.warn);
                 }
