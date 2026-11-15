@@ -9,14 +9,16 @@ import {
   RefreshCw,
   FileText,
   ExternalLink,
-  Loader2
+  Loader2,
+  Keyboard
 } from 'lucide-react';
 import { 
   VoiceRecorderController, 
   VoiceRecorderState, 
   formatAudioDuration,
   isMobileDevice,
-  transcribeAudioWithAI
+  transcribeAudioWithAI,
+  clearPrimedMicrophoneStream
 } from '../utils/voiceRecorder';
 
 interface VoiceNoteRecorderModalProps {
@@ -53,6 +55,9 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
     fallbackTranscript: string;
     applyToFormOnly: boolean;
   } | null>(null);
+  const [isKeyboardMode, setIsKeyboardMode] = useState(false);
+  const [keyboardText, setKeyboardText] = useState('');
+  const keyboardTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isMobile = isMobileDevice();
 
   const controllerRef = useRef<VoiceRecorderController | null>(null);
@@ -64,6 +69,7 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
     });
 
     return () => {
+      clearPrimedMicrophoneStream();
       controllerRef.current?.cancelRecording();
     };
   }, []);
@@ -74,6 +80,8 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
       setIsTranscribing(false);
       setTranscribeError(null);
       setPendingRecording(null);
+      setIsKeyboardMode(false);
+      setKeyboardText('');
       setRecorderState({
         isRecording: false,
         duration: 0,
@@ -87,15 +95,28 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
       setIsTranscribing(false);
       setTranscribeError(null);
       setPendingRecording(null);
+      setIsKeyboardMode(false);
+      setKeyboardText('');
+      clearPrimedMicrophoneStream();
       controllerRef.current?.cancelRecording();
     }
   }, [isOpen]);
 
   const handleStart = async () => {
     if (!controllerRef.current) return;
+    setIsKeyboardMode(false);
     setTranscribeError(null);
     setPendingRecording(null);
     await controllerRef.current.startRecording();
+  };
+
+  const handleSwitchToKeyboard = () => {
+    clearPrimedMicrophoneStream();
+    controllerRef.current?.cancelRecording();
+    setIsKeyboardMode(true);
+    window.setTimeout(() => {
+      keyboardTextareaRef.current?.focus();
+    }, 30);
   };
 
   const resolveFinalTranscript = async (
@@ -124,7 +145,20 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
   };
 
   const handleFinishSave = async () => {
-    if (!controllerRef.current || isTranscribing) return;
+    if (isTranscribing) return;
+
+    if (isKeyboardMode) {
+      const clean = keyboardText.trim();
+      if (!clean) return;
+      onFinishSaveDirectly({
+        text: clean,
+        duration: 0,
+      });
+      onClose();
+      return;
+    }
+
+    if (!controllerRef.current) return;
 
     if (pendingRecording) {
       onFinishSaveDirectly({
@@ -159,7 +193,18 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
   };
 
   const handleApplyToFormOnly = async () => {
-    if (!controllerRef.current || isTranscribing) return;
+    if (isTranscribing) return;
+
+    if (isKeyboardMode) {
+      const clean = keyboardText.trim();
+      if (clean && onApplyToForm) {
+        onApplyToForm(clean);
+      }
+      onClose();
+      return;
+    }
+
+    if (!controllerRef.current) return;
 
     if (pendingRecording) {
       if (onApplyToForm) {
@@ -210,6 +255,7 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
 
   const handleCancel = () => {
     if (isTranscribing) return;
+    clearPrimedMicrophoneStream();
     controllerRef.current?.cancelRecording();
     onClose();
   };
@@ -273,69 +319,115 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
 
         {/* Konten Utama */}
         <div className="p-5 sm:p-6 space-y-5">
-          {/* KASUS 1: CHROME/PERANGKAT SUDAH MEMBLOKIR MIKROFON SEHINGGA KARTU GOOGLE TIDAK MUNCUL */}
-          {recorderState.permissionStatus === 'denied' && (
-            <div className={`p-4 rounded-2xl border text-xs space-y-2.5 ${
+          {/* MODE FALLBACK: KETIK / DIKTE LEWAT KEYBOARD HP */}
+          {isKeyboardMode && (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-bold">
+                <span className="flex items-center gap-1.5 text-teal-500">
+                  <Keyboard className="w-4 h-4" />
+                  <span>Ketik / Dikte lewat Keyboard HP</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  className="text-[11px] font-semibold text-sky-500 hover:underline cursor-pointer"
+                >
+                  Coba Mikrofon Lagi
+                </button>
+              </div>
+              <textarea
+                ref={keyboardTextareaRef}
+                autoFocus
+                rows={4}
+                value={keyboardText}
+                onChange={(e) => setKeyboardText(e.target.value)}
+                placeholder="Ketik catatan di sini atau ketuk ikon mikrofon pada keyboard HP Anda..."
+                className={`w-full rounded-2xl p-3.5 text-xs leading-relaxed font-semibold border resize-none focus:outline-none focus:ring-2 focus:ring-teal-500/40 ${
+                  isLight
+                    ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400'
+                    : 'bg-black/30 border-white/15 text-white placeholder-white/40'
+                }`}
+              />
+            </div>
+          )}
+
+          {/* KASUS 1: MIKROFON TERBLOKIR (PESAN RINGKAS 1 BARIS + OPSI KEYBOARD HP) */}
+          {!isKeyboardMode && recorderState.permissionStatus === 'denied' && (
+            <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${
               isLight ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
             }`}>
-              <div className="flex items-start gap-2.5">
-                <MicOff className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-bold">Kartu izin Google/Chrome tidak dapat muncul karena status Mikrofon saat ini Diblokir di browser.</p>
-                  <p className={`text-[11px] leading-relaxed ${isLight ? 'text-rose-800/90' : 'text-rose-200/80'}`}>
-                    {recorderState.errorMessage}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
+              <p className="font-semibold leading-snug">
+                {recorderState.errorMessage ||
+                  'Izin mikrofon terblokir. Ketuk ikon gembok/setelan di sebelah alamat web (URL) atas, lalu pilih Izinkan Mikrofon.'}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSwitchToKeyboard}
+                  className={`py-1.5 px-3 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                    isLight
+                      ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+                      : 'bg-white/10 hover:bg-white/15 text-white border-white/20'
+                  }`}
+                >
+                  <Keyboard className="w-3.5 h-3.5" />
+                  <span>Ketik / Dikte lewat Keyboard HP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  className={`py-1.5 px-3 rounded-xl text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                    isLight
+                      ? 'text-rose-700 hover:bg-rose-100'
+                      : 'text-rose-300 hover:bg-rose-500/20'
+                  }`}
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Coba Lagi</span>
+                </button>
                 {typeof window !== 'undefined' && window.self !== window.top && (
                   <a
                     href={window.location.origin}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={`py-2 px-3 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
-                      isLight
-                        ? 'bg-white hover:bg-rose-100 text-rose-900 border-rose-300'
-                        : 'bg-white/10 hover:bg-white/15 text-rose-100 border-rose-400/30'
+                    className={`py-1.5 px-3 rounded-xl text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                      isLight ? 'text-slate-600 hover:underline' : 'text-white/70 hover:underline'
                     }`}
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Buka di Tab Chrome Penuh</span>
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Tab Penuh</span>
                   </a>
                 )}
-                <button
-                  type="button"
-                  onClick={handleStart}
-                  className={`py-2 px-3 rounded-xl text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
-                    isLight
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                      : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30'
-                  }`}
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Coba Lagi</span>
-                </button>
               </div>
             </div>
           )}
 
           {/* KASUS 2: PERANGKAT TIDAK MENDUKUNG */}
-          {recorderState.permissionStatus === 'unsupported' && (
-            <div className={`p-4 rounded-2xl border text-xs space-y-2 ${
+          {!isKeyboardMode && recorderState.permissionStatus === 'unsupported' && (
+            <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${
               isLight ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
             }`}>
-              <div className="flex items-center gap-2 font-black text-sm">
-                <MicOff className="w-4 h-4 text-rose-500" />
-                <span>Mikrofon Tidak Didukung</span>
-              </div>
-              <p className="font-semibold leading-relaxed">
-                Peramban Anda saat ini tidak mendukung antarmuka penangkapan audio perangkat. Gunakan peramban modern seperti Google Chrome, Safari, atau Microsoft Edge.
+              <p className="font-semibold leading-snug">
+                Peramban ini tidak mendukung rekaman mikrofon langsung. Gunakan keyboard HP untuk mengetik atau mendikte catatan.
               </p>
+              <button
+                type="button"
+                onClick={handleSwitchToKeyboard}
+                className={`py-1.5 px-3 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                  isLight
+                    ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+                    : 'bg-white/10 hover:bg-white/15 text-white border-white/20'
+                }`}
+              >
+                <Keyboard className="w-3.5 h-3.5" />
+                <span>Ketik / Dikte lewat Keyboard HP</span>
+              </button>
             </div>
           )}
 
           {/* KASUS 3: SEDANG MEREKAM ATAU MENUNGGU IZIN */}
-          {recorderState.permissionStatus !== 'denied' && recorderState.permissionStatus !== 'unsupported' && (
+          {!isKeyboardMode && recorderState.permissionStatus !== 'denied' && recorderState.permissionStatus !== 'unsupported' && (
             <div className="space-y-4">
               {/* Visualizer Gelombang & Timer */}
               <div className={`p-6 rounded-3xl border flex flex-col items-center justify-center gap-3 relative overflow-hidden transition-all ${
@@ -465,7 +557,7 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
               Batal
             </button>
 
-            {onApplyToForm && recorderState.transcript && (
+            {onApplyToForm && (recorderState.transcript || (isKeyboardMode && keyboardText.trim())) && (
               <button
                 type="button"
                 onClick={handleApplyToFormOnly}
@@ -486,8 +578,10 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
               onClick={handleFinishSave}
               disabled={
                 isTranscribing ||
-                recorderState.permissionStatus === 'denied' ||
-                recorderState.permissionStatus === 'unsupported'
+                (isKeyboardMode
+                  ? !keyboardText.trim()
+                  : recorderState.permissionStatus === 'denied' ||
+                    recorderState.permissionStatus === 'unsupported')
               }
               className={`px-6 py-3 rounded-xl text-xs font-black transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2 text-white ${
                 isLight

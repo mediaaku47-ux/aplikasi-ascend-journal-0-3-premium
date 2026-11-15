@@ -42,7 +42,9 @@ let pendingPrimedMicPromise: Promise<{ stream: MediaStream | null; error: any }>
  */
 export function primeMicrophoneStream(): void {
   if (!isAudioRecordingSupported()) return;
-  if (pendingPrimedMicPromise) return;
+  if (pendingPrimedMicPromise) {
+    clearPrimedMicrophoneStream();
+  }
 
   try {
     pendingPrimedMicPromise = navigator.mediaDevices
@@ -152,11 +154,9 @@ export class VoiceRecorderController {
     } catch (err: any) {
       console.warn('[VoiceRecorder] Gagal memperoleh izin mikrofon:', err);
       const rawMsg = String(err?.message || '').toLowerCase();
-      let errorMsg = 'Izin mikrofon diblokir oleh pengaturan browser.';
+      let errorMsg = 'Izin mikrofon terblokir. Ketuk ikon gembok/setelan di sebelah alamat web (URL) atas, lalu pilih Izinkan Mikrofon.';
       if (rawMsg.includes('permissions policy') || rawMsg.includes('feature policy')) {
-        errorMsg = 'Akses mikrofon dibatasi oleh bingkai pratinjau. Buka langsung di tab Chrome penuh.';
-      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errorMsg = 'Mikrofon sedang berstatus Diblokir di pengaturan browser Anda. Ubah izin Mikrofon menjadi Izinkan di ikon setelan/gembok sebelah alamat situs.';
+        errorMsg = 'Izin mikrofon terblokir oleh bingkai pratinjau. Buka langsung di tab browser penuh.';
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         errorMsg = 'Perangkat keras mikrofon tidak terdeteksi pada perangkat Anda.';
       } else if (err.name === 'NotReadableError') {
