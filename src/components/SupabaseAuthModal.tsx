@@ -371,7 +371,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-md p-4 animate-in fade-in duration-200">
       <div 
         id="modal-supabase-auth"
         className="bg-[#0e111a]/95 backdrop-blur-3xl rounded-[28px] shadow-[0_20px_60px_rgba(0,0,0,0.8),0_0_40px_rgba(45,212,191,0.12)] w-full max-w-lg p-6 sm:p-7 border border-teal-500/30 relative text-white max-h-[90vh] overflow-y-auto"

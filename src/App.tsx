@@ -259,6 +259,20 @@ export default function App() {
     }
   };
 
+  const handleUserChange = useCallback((user: SupabaseUser | null) => {
+    if (user) {
+      setCurrentUser(user);
+      try {
+        localStorage.setItem('journalstream_current_user', JSON.stringify(user));
+      } catch {}
+    } else {
+      setCurrentUser(getFallbackDefaultUser());
+      try {
+        localStorage.removeItem('journalstream_current_user');
+      } catch {}
+    }
+  }, []);
+
   // Keluar dari akun (Logout)
   const handleLogout = async () => {
     try {
@@ -295,6 +309,7 @@ export default function App() {
           currentUser={currentUser}
           initialProfile={currentProfile}
           onLogout={handleLogout}
+          onUserChange={handleUserChange}
         />
       )}
 

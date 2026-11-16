@@ -30,9 +30,9 @@ const DEFAULT_NOTIFICATION_SETTINGS: DeviceNotificationSettings = {
   agendaReminderHour: 21, // Pukul 21:00 WIB (sebelum batas malam 22.00)
   journalReminders: false, // Dinonaktifkan sesuai permintaan pengguna
   journalWarningMinutes: 20,
-  habitReminders: true,
+  habitReminders: false, // Dimatikan default untuk pengguna baru; diaktifkan oleh pengguna sendiri
   habitReminderHour: 20, // Pukul 20:00 WIB
-  targetReminders: true,
+  targetReminders: false, // Dimatikan default untuk pengguna baru; diaktifkan oleh pengguna sendiri
 };
 
 const SETTINGS_STORAGE_KEY = 'ascend_device_notification_settings';
@@ -731,7 +731,7 @@ const calcRemainingDaysIso = (fromIso: string, toIso?: string): number | null =>
 export function checkAllTargetsForReminders(targets: TargetItem[]): void {
   if (!targets || !Array.isArray(targets) || targets.length === 0) return;
   const settings = getNotificationSettings();
-  if (!settings.enabled || settings.targetReminders === false) return;
+  if (!settings.enabled || !settings.targetReminders) return;
   if (!isWebNotificationSupported() || Notification.permission !== 'granted') return;
 
   const now = new Date();
@@ -814,7 +814,10 @@ export async function sendTargetConfirmationNotification(
   if (!isWebNotificationSupported() || Notification.permission !== 'granted') {
     return false;
   }
-  saveNotificationSettings({ enabled: true, targetReminders: true });
+  const settings = getNotificationSettings();
+  if (!settings.enabled || !settings.targetReminders) {
+    return false;
+  }
 
   const todayStr = getTodayDateString();
   const deadlineLabel = deadlineDate ? formatDeadlineDateId(deadlineDate) : 'sesuai jadwal';
@@ -846,12 +849,15 @@ export async function sendTargetConfirmationNotification(
  * Kirim notifikasi uji coba pengingat target ke HP / perangkat pengguna
  */
 export async function sendTargetTestNotification(sampleTitle?: string): Promise<boolean> {
+  const settings = getNotificationSettings();
+  if (!settings.enabled || !settings.targetReminders) {
+    return false;
+  }
   const perm = getNotificationPermissionStatus();
   if (perm !== 'granted') {
     const requested = await requestNotificationPermission();
     if (requested !== 'granted') return false;
   }
-  saveNotificationSettings({ enabled: true, targetReminders: true });
   return sendDeviceNotification('🔔 Notifikasi Target HP & Perangkat Aktif!', {
     body: sampleTitle
       ? `Siap menyemangatimu! Pengingat untuk "${sampleTitle}" akan muncul langsung di perangkatmu agar kamu mencapai targetmu.`

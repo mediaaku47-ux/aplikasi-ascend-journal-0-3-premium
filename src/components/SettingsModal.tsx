@@ -81,13 +81,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isTestingNotif, setIsTestingNotif] = useState(false);
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
-  const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders;
+  const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders === true;
 
   const handleToggleHabitNotification = () => {
     const nextVal = !isHabitNotifActive;
     const updated = {
       ...notifSettings,
-      enabled: nextVal,
+      enabled: nextVal ? true : notifSettings.enabled,
       habitReminders: nextVal,
     };
     const saved = saveNotificationSettings(updated);

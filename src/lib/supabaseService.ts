@@ -285,10 +285,144 @@ export interface CloudFullData {
   savingsBalance?: number;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const isValidSupabaseUserId = (userId?: string | null): userId is string => {
+  return Boolean(userId && UUID_REGEX.test(userId));
+};
+
+const DEVICE_SUPABASE_CREDS_KEY = 'ascend_device_supabase_creds';
+
+async function verifyActiveSupabaseSession(
+  userId?: string | null,
+  autoProvisionIfMissing = false
+): Promise<
+  | { ok: true; client: ReturnType<typeof getSupabase>; userId: string; sessionUser: User }
+  | { ok: false; error: { code: string; message: string } }
+> {
+  if (!isSupabaseConfigured()) {
+    return {
+      ok: false,
+      error: {
+        code: 'SUPABASE_NOT_CONFIGURED',
+        message: 'Konfigurasi proyek Supabase belum terhubung.',
+      },
+    };
+  }
+  try {
+    const client = getSupabase();
+    let { data, error } = await client.auth.getSession();
+    if (error || !data?.session?.user) {
+      const refreshed = await client.auth.refreshSession().catch(() => null);
+      if (refreshed?.data?.session?.user) {
+        data = refreshed.data as any;
+        error = null;
+      }
+    }
+
+    if ((error || !data?.session?.user) && autoProvisionIfMissing) {
+      // Coba gunakan kredensial sesi perangkat yang pernah dibuat otomatis di browser ini
+      try {
+        const savedRaw = typeof window !== 'undefined' ? localStorage.getItem(DEVICE_SUPABASE_CREDS_KEY) : null;
+        if (savedRaw) {
+          const saved = JSON.parse(savedRaw);
+          if (saved?.email && saved?.password) {
+            const signInRes = await client.auth.signInWithPassword({
+              email: saved.email,
+              password: saved.password,
+            });
+            if (!signInRes.error && signInRes.data?.session?.user) {
+              data = { session: signInRes.data.session } as any;
+              error = null;
+            }
+          }
+        }
+      } catch {}
+
+      // Jika belum ada atau tidak valid, buat akun perangkat otomatis di Supabase Auth (mailer_autoconfirm aktif)
+      if (error || !data?.session?.user) {
+        const randTag = `${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 7)}`;
+        const deviceEmail = `ascend.device.${randTag}@ascendjournal.app`;
+        const devicePassword = `Ascend!${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        const signUpRes = await client.auth.signUp({
+          email: deviceEmail,
+          password: devicePassword,
+          options: {
+            data: {
+              full_name: 'Pengguna Ascend',
+              name: 'Pengguna Ascend',
+            },
+          },
+        });
+        if (!signUpRes.error && signUpRes.data?.session?.user) {
+          data = { session: signUpRes.data.session } as any;
+          error = null;
+          try {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(
+                DEVICE_SUPABASE_CREDS_KEY,
+                JSON.stringify({ email: deviceEmail, password: devicePassword })
+              );
+            }
+          } catch {}
+        } else if (signUpRes.error) {
+          return {
+            ok: false,
+            error: {
+              code: 'AUTO_SESSION_FAILED',
+              message: signUpRes.error.message || 'Gagal menghubungkan sesi otomatis ke Supabase.',
+            },
+          };
+        }
+      }
+    }
+
+    if (error || !data?.session?.user) {
+      return {
+        ok: false,
+        error: {
+          code: 'SESSION_EXPIRED',
+          message: 'Sesi Supabase belum aktif. Silakan coba lagi.',
+        },
+      };
+    }
+
+    if (isValidSupabaseUserId(userId) && data.session.user.id !== userId && !autoProvisionIfMissing) {
+      return {
+        ok: false,
+        error: {
+          code: 'USER_MISMATCH',
+          message: 'Akun aktif tidak cocok dengan sesi Supabase.',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      client,
+      userId: data.session.user.id,
+      sessionUser: data.session.user,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: {
+        code: 'SESSION_ERROR',
+        message: err?.message || 'Gagal memverifikasi sesi Supabase.',
+      },
+    };
+  }
+}
+
 export const dbService = {
   // Ambil semua data pengguna dari tabel-tabel Supabase
   async fetchAllUserData(userId: string): Promise<CloudFullData | null> {
-    const client = getSupabase();
+    const check = await verifyActiveSupabaseSession(userId, false);
+    if (check.ok === false) {
+      return null;
+    }
+    const client = check.client;
+    userId = check.userId;
 
     try {
       const [
@@ -602,50 +736,93 @@ export const dbService = {
     return client.from('journals').delete().eq('id', noteId).eq('user_id', userId);
   },
 
-  async upsertAgenda(userId: string, task: Task) {
-    const client = getSupabase();
-    return client.from('agendas').upsert({
-      id: task.id,
-      user_id: userId,
-      title: task.title,
-      days: task.days || {},
-      category: task.category || 'Umum',
-      flagged: !!task.flagged,
-      updated_at: new Date().toISOString(),
-    });
+  async upsertAgenda(userId: string | undefined, task: Task) {
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { data: null, error: check.error, sessionUser: null as User | null };
+    }
+    const activeUserId = check.userId;
+    const dateText = task.createdAt
+      ? task.createdAt.slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const isCompleted = Object.values(task.days || {}).some((v) => v === 'done');
+
+    const res = await check.client
+      .from('agendas')
+      .upsert(
+        {
+          id: task.id,
+          user_id: activeUserId,
+          title: task.title,
+          date: dateText,
+          is_completed: isCompleted,
+          days: task.days || {},
+          category: task.category || 'Umum',
+          flagged: !!task.flagged,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      )
+      .select()
+      .single();
+
+    return {
+      ...res,
+      sessionUser: check.sessionUser,
+    };
   },
 
-  async syncAllAgendas(userId: string, tasks: Task[]) {
-    const client = getSupabase();
+  async syncAllAgendas(userId: string | undefined, tasks: Task[]) {
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { data: null, error: check.error, sessionUser: null as User | null };
+    }
+    const client = check.client;
+    const activeUserId = check.userId;
     if (tasks.length === 0) {
-      return client.from('agendas').delete().eq('user_id', userId);
+      const delRes = await client.from('agendas').delete().eq('user_id', activeUserId);
+      return { ...delRes, sessionUser: check.sessionUser };
     }
     const payloads = tasks.map((t) => ({
       id: t.id,
-      user_id: userId,
+      user_id: activeUserId,
       title: t.title,
+      date: t.createdAt ? t.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+      is_completed: Object.values(t.days || {}).some((v) => v === 'done'),
       days: t.days || {},
       category: t.category || 'Umum',
       flagged: !!t.flagged,
       updated_at: new Date().toISOString(),
     }));
-    const res = await client.from('agendas').upsert(payloads);
-    try {
-      const currentIds = tasks.map((t) => t.id);
-      const { data: remoteRows } = await client.from('agendas').select('id').eq('user_id', userId);
-      if (remoteRows) {
-        const toDelete = remoteRows.filter((r: any) => !currentIds.includes(r.id)).map((r: any) => r.id);
-        if (toDelete.length > 0) {
-          await client.from('agendas').delete().eq('user_id', userId).in('id', toDelete);
+    const res = await client.from('agendas').upsert(payloads, { onConflict: 'id' }).select();
+    if (!res.error) {
+      try {
+        const currentIds = new Set(tasks.map((t) => t.id));
+        const { data: remoteRows } = await client.from('agendas').select('id').eq('user_id', activeUserId);
+        if (remoteRows) {
+          const toDelete = remoteRows.filter((r: any) => !currentIds.has(r.id)).map((r: any) => r.id);
+          if (toDelete.length > 0) {
+            await client.from('agendas').delete().eq('user_id', activeUserId).in('id', toDelete);
+          }
         }
-      }
-    } catch {}
-    return res;
+      } catch {}
+    }
+    return {
+      ...res,
+      sessionUser: check.sessionUser,
+    };
   },
 
-  async deleteAgenda(userId: string, taskId: string) {
-    const client = getSupabase();
-    return client.from('agendas').delete().eq('id', taskId).eq('user_id', userId);
+  async deleteAgenda(userId: string | undefined, taskId: string) {
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { data: null, error: check.error, sessionUser: null as User | null };
+    }
+    const res = await check.client.from('agendas').delete().eq('id', taskId).eq('user_id', check.userId);
+    return {
+      ...res,
+      sessionUser: check.sessionUser,
+    };
   },
 
   async upsertHabit(userId: string, habit: Habit) {
@@ -1114,7 +1291,7 @@ export const subscribeToRealtimeSync = (
   userId: string,
   handlers: RealtimeSyncHandlers
 ): (() => void) => {
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !isValidSupabaseUserId(userId)) {
     return () => {};
   }
 

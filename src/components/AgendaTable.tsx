@@ -23,6 +23,7 @@ import { triggerConfetti } from '../utils/confetti';
 interface AgendaTableProps {
   tasks: Task[];
   onUpdateTasks: (tasks: Task[]) => void | Promise<void>;
+  onAddTask?: (task: Task) => void | Promise<void>;
   monthName: string;
   monthIndex?: number;
   year?: number;
@@ -34,6 +35,7 @@ interface AgendaTableProps {
 export const AgendaTable: React.FC<AgendaTableProps> = ({
   tasks,
   onUpdateTasks,
+  onAddTask,
   monthName,
   monthIndex = 2,
   year = 2026,
@@ -65,6 +67,7 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
 
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskFlagged, setNewTaskFlagged] = useState(false);
+  const [isAddingTask, setIsAddingTask] = useState(false);
   const [activeDayHover, setActiveDayHover] = useState<number | null>(null);
 
   // Draft/pending checkmarks sebelum tombol "Simpan" diklik
@@ -312,23 +315,34 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
     return 'bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold shadow-xs';
   };
 
-  // Add new task
+  // Add new task directly to Supabase
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTaskTitle.trim()) return;
+    const trimmed = newTaskTitle.trim();
+    if (!trimmed || isAddingTask) return;
+    const prevFlagged = newTaskFlagged;
+    const uniqueSuffix = Math.random().toString(36).slice(2, 7);
     const newTask: Task = {
-      id: `task-${Date.now()}`,
-      title: newTaskTitle.trim(),
-      flagged: newTaskFlagged,
+      id: `task-${Date.now()}-${uniqueSuffix}`,
+      title: trimmed,
+      flagged: prevFlagged,
       days: {},
       createdAt: new Date().toISOString(),
     };
-    setNewTaskTitle('');
-    setNewTaskFlagged(false);
+    setIsAddingTask(true);
     try {
-      await onUpdateTasks([...tasks, newTask]);
-    } catch {
-      onShowToast?.('Gagal menambahkan agenda ke database.');
+      if (onAddTask) {
+        await onAddTask(newTask);
+      } else {
+        await onUpdateTasks([...tasks, newTask]);
+        onShowToast?.('Agenda baru berhasil ditambahkan ke Supabase!');
+      }
+      setNewTaskTitle('');
+      setNewTaskFlagged(false);
+    } catch (err: any) {
+      onShowToast?.(err?.message || 'Gagal menambahkan agenda ke database Supabase.');
+    } finally {
+      setIsAddingTask(false);
     }
   };
 
@@ -372,32 +386,12 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
   const dayPercent = tasks.length > 0 ? Math.round((dayDoneCount / tasks.length) * 100) : 0;
 
   return (
-    <div 
+    <div
       id="agenda-harian-card"
-      style={
-        isLight
-          ? {
-              boxShadow: '0 4px 24px -2px rgba(0, 0, 0, 0.06)',
-            }
-          : undefined
-      }
       className={`${
-        isLight
-          ? 'bg-white border border-slate-200/90 text-slate-900 shadow-[0_4px_24px_-2px_rgba(0,0,0,0.06)]'
-          : 'bg-[#111827] border border-[#263449] text-white shadow-md'
-      } rounded-[28px] p-4 sm:p-5 md:p-6 relative overflow-hidden transition-all duration-300`}
+        isLight ? 'text-slate-900' : 'text-white'
+      } relative transition-all duration-300`}
     >
-      {/* Inward Glow dari Bawah ke Atas (Cahaya ke Dalam) */}
-      <div 
-        className={`pointer-events-none absolute inset-x-0 bottom-0 h-44 rounded-b-[28px] z-0 ${
-          isLight
-            ? 'bg-gradient-to-t from-[#032D22]/12 via-[#032D22]/4 to-transparent'
-            : 'bg-gradient-to-t from-[#2DD4BF]/22 via-[#2DD4BF]/6 to-transparent'
-        }`} 
-      />
-
-      {/* Subtle glowing radial background highlight */}
-      <div className={`absolute top-0 right-0 w-48 h-48 rounded-full blur-3xl pointer-events-none ${isLight ? 'bg-teal-500/10' : 'bg-sky-500/10'}`} />
 
       {/* Header with View Switcher */}
       <div className={`flex justify-between items-start md:items-center mb-4 border-b pb-4 flex-col sm:flex-row gap-3 relative z-10 ${
@@ -652,12 +646,19 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={!newTaskTitle.trim()}
+                disabled={!newTaskTitle.trim() || isAddingTask}
                 className={`text-xs ${
                   isLight ? 'bg-[#003B2F] hover:bg-[#002e24]' : 'bg-teal-600 hover:bg-teal-700'
-                } disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl transition-all font-bold cursor-pointer shadow-sm shrink-0 active:scale-95 whitespace-nowrap`}
+                } disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl transition-all font-bold cursor-pointer shadow-sm shrink-0 active:scale-95 whitespace-nowrap flex items-center gap-1.5`}
               >
-                Tambah
+                {isAddingTask ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : (
+                  <span>Tambah</span>
+                )}
               </button>
             </div>
           </form>
@@ -874,7 +875,7 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
             </button>
           </div>
 
-          <div className="overflow-x-auto pb-2 custom-scrollbar -mx-4 px-4 sm:-mx-5 sm:px-5 md:-mx-6 md:px-6">
+          <div className="overflow-x-auto pb-2 custom-scrollbar">
             <table className="w-full text-left border-collapse min-w-[680px]">
               <thead>
                 <tr>

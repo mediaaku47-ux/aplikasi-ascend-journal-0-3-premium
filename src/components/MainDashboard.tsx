@@ -8,7 +8,7 @@ import { AscendDesktopDashboard } from './AscendDesktopDashboard';
 import { GlobalSearchBar } from './GlobalSearchBar';
 import { PageTransitionSkeleton } from './PageTransitionSkeleton';
 import { AdminAnnouncementsModal } from './AdminAnnouncementsModal';
-import { dbService, subscribeToRealtimeSync, CloudFullData } from '../lib/supabaseService';
+import { dbService, subscribeToRealtimeSync, CloudFullData, isValidSupabaseUserId } from '../lib/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { checkIsAdminUser } from '../utils/admin';
 import { SupabaseAuthModal } from './SupabaseAuthModal';
@@ -84,12 +84,14 @@ interface MainDashboardProps {
   currentUser: SupabaseUser;
   initialProfile?: UserProfile | null;
   onLogout: () => void;
+  onUserChange?: (user: SupabaseUser | null) => void;
 }
 
 export const MainDashboard: React.FC<MainDashboardProps> = ({
   currentUser,
   initialProfile,
   onLogout,
+  onUserChange,
 }) => {
   const realToday = getRealToday();
 
@@ -166,12 +168,14 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   const [isRoadmapModalOpen, setIsRoadmapModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isAnnouncementsAdminOpen, setIsAnnouncementsAdminOpen] = useState(false);
-  const [supabaseModalTab, setSupabaseModalTab] = useState<'login' | 'register' | 'account' | 'config' | 'migration'>('account');
+  const [supabaseModalTab, setSupabaseModalTab] = useState<'login' | 'register' | 'account' | 'config' | 'migration' | undefined>(undefined);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const handleOpenSupabaseModal = (tab?: 'login' | 'register' | 'account' | 'config' | 'migration') => {
     if (tab) {
       setSupabaseModalTab(tab);
+    } else {
+      setSupabaseModalTab(isValidSupabaseUserId(currentUser?.id) ? 'account' : 'login');
     }
     setIsSupabaseModalOpen(true);
   };
@@ -328,7 +332,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       return [];
     }
   });
-  const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState<boolean>(() => Boolean(currentUser?.id));
+  const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState<boolean>(() => isValidSupabaseUserId(currentUser?.id));
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
 
   // Status notifikasi belum dibaca (Unread status)
@@ -667,6 +671,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     localStorage.removeItem('journalstream_target_extras');
     localStorage.removeItem('journalstream_total_balance');
     localStorage.removeItem('journalstream_savings_balance');
+    localStorage.removeItem('ascend_device_notification_settings');
   };
 
   const handleApplyCloudData = (data: CloudFullData, sourceTable?: string) => {
@@ -774,12 +779,15 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   // Inisialisasi saat aplikasi pertama kali dimuat (load/refresh) untuk mengambil (SELECT) seluruh data dari Supabase berdasarkan user_id yang sedang login
   useEffect(() => {
     let isMounted = true;
-    if (!currentUser?.id) {
+    if (!isValidSupabaseUserId(currentUser?.id)) {
       setIsLoadingFromSupabase(false);
       return;
     }
 
-    setIsLoadingFromSupabase(true);
+    const recentAgendaMutation = Date.now() - lastMutationTimeRef.current.agendas <= 5000;
+    if (!recentAgendaMutation) {
+      setIsLoadingFromSupabase(true);
+    }
 
     // Mengambil (SELECT) data lengkap dari Supabase (wallets, agendas, journals, habits, targets, user_profiles)
     dbService.fetchAllUserData(currentUser.id)
@@ -803,7 +811,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         if (cloudData.transactions !== undefined) {
           setTransactions(cloudData.transactions);
         }
-        if (cloudData.tasks !== undefined) {
+        if (cloudData.tasks !== undefined && Date.now() - lastMutationTimeRef.current.agendas > 5000) {
           setTasks(cloudData.tasks);
         }
         if (cloudData.quickNotes !== undefined) {
@@ -1202,27 +1210,54 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     }, 750);
   };
 
-  const handleAddTask = (newTask: Task) => {
+  const handleAddTask = async (newTask: Task): Promise<void> => {
     lastMutationTimeRef.current.agendas = Date.now();
-    setTasks((prev) => [...prev, newTask]);
-    if (currentUser?.id) {
-      dbService.upsertAgenda(currentUser.id, newTask)
-        .then(() => showToast('Agenda tersimpan di Supabase!'))
-        .catch(console.warn);
+    const res = await dbService.upsertAgenda(currentUser?.id, newTask);
+    const err = (res as { error?: { code?: string; message?: string } | null })?.error;
+    if (err) {
+      const errMsg = err.message || 'Gagal menyimpan agenda ke tabel Supabase.';
+      showToast(`Gagal masuk ke Supabase: ${errMsg}`);
+      throw new Error(errMsg);
     }
+
+    const sessionUser = (res as { sessionUser?: SupabaseUser | null })?.sessionUser;
+    const nextTasks = [...tasks, newTask];
+
+    if (sessionUser && sessionUser.id !== currentUser?.id) {
+      lastMutationTimeRef.current.agendas = Date.now();
+      if (tasks.length > 0) {
+        dbService.syncAllAgendas(sessionUser.id, nextTasks).catch(console.warn);
+      }
+      onUserChange?.(sessionUser);
+    }
+
+    setTasks(nextTasks);
+    try {
+      localStorage.setItem('journalstream_tasks', JSON.stringify(nextTasks));
+    } catch {}
+    showToast('Agenda langsung tersimpan ke database Supabase!');
   };
 
   const handleUpdateTasks = async (newTasks: Task[]): Promise<void> => {
     lastMutationTimeRef.current.agendas = Date.now();
-    if (currentUser?.id) {
-      const res = await dbService.syncAllAgendas(currentUser.id, newTasks);
-      if (res && (res as { error?: { message?: string } }).error) {
-        const errMsg = (res as { error: { message?: string } }).error.message || 'Gagal menyimpan agenda ke database.';
-        showToast(`Gagal menyimpan: ${errMsg}`);
-        throw new Error(errMsg);
-      }
+    const res = await dbService.syncAllAgendas(currentUser?.id, newTasks);
+    const err = (res as { error?: { code?: string; message?: string } | null })?.error;
+    if (err) {
+      const errMsg = err.message || 'Gagal menyinkronkan agenda ke database Supabase.';
+      showToast(`Gagal masuk ke Supabase: ${errMsg}`);
+      throw new Error(errMsg);
     }
+
+    const sessionUser = (res as { sessionUser?: SupabaseUser | null })?.sessionUser;
+    if (sessionUser && sessionUser.id !== currentUser?.id) {
+      lastMutationTimeRef.current.agendas = Date.now();
+      onUserChange?.(sessionUser);
+    }
+
     setTasks(newTasks);
+    try {
+      localStorage.setItem('journalstream_tasks', JSON.stringify(newTasks));
+    } catch {}
   };
 
 
@@ -1632,7 +1667,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         currentUser={currentUser}
         userProfile={userProfile}
         isSupabaseConfigured={isSupabaseConfigured()}
-        onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+        onOpenSupabaseModal={() => handleOpenSupabaseModal()}
         onLogout={onLogout}
         onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
         announcements={announcements}
@@ -1656,7 +1691,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
           currentUser={currentUser}
           userProfile={userProfile}
           isSupabaseConfigured={isSupabaseConfigured()}
-          onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+          onOpenSupabaseModal={() => handleOpenSupabaseModal()}
           onLogout={onLogout}
           onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
           announcements={announcements}
@@ -1847,6 +1882,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               <AgendaView
                 tasks={tasks}
                 onUpdateTasks={handleUpdateTasks}
+                onAddTask={handleAddTask}
                 userProfile={userProfile}
                 onOpenNewEntry={() => {
                   setNewEntryInitialType('task');
@@ -2154,6 +2190,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               firstAppOpenAt={userProfile.firstAppOpenAt}
               accountCreatedAt={userProfile.accountCreatedAt || localStorage.getItem('ascend_account_created_at') || currentUser?.created_at}
               onShowToast={showToast}
+              theme={theme}
               onSaveFeedback={(newFeedback) => {
                 const updatedProfile = {
                   ...userProfile,
@@ -2189,8 +2226,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             totalBalance={totalBalance}
             onApplySyncData={handleApplySyncData}
             showToast={showToast}
-            onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
-            currentUser={currentUser}
+            onOpenSupabaseModal={() => handleOpenSupabaseModal('login')}
+            currentUser={isValidSupabaseUserId(currentUser?.id) ? currentUser : null}
             theme={theme}
           />
         )}
@@ -2200,8 +2237,10 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
           onClose={() => {
             setIsSupabaseModalOpen(false);
           }}
-          currentUser={currentUser}
-          onUserChange={() => {}}
+          currentUser={isValidSupabaseUserId(currentUser?.id) ? currentUser : null}
+          onUserChange={(u) => {
+            onUserChange?.(u);
+          }}
           userProfile={userProfile}
           tasks={tasks}
           habits={habits}

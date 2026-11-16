@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { UserProfile } from '../../types';
 import { 
   User as UserIcon, 
-  RefreshCw, 
   Smartphone, 
   CheckCircle2,
   Save,
@@ -56,7 +55,6 @@ interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({
   userProfile,
   onUpdateProfile,
-  onOpenResetModal,
   onExportData,
   onExportPDF,
   onImportData,
@@ -97,14 +95,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isTestingNotif, setIsTestingNotif] = useState(false);
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
-  const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders;
-  const isTargetNotifActive = notifSettings.enabled && notifSettings.targetReminders !== false;
+  const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders === true;
+  const isTargetNotifActive = notifSettings.enabled && notifSettings.targetReminders === true;
 
   const handleToggleHabitNotification = () => {
     const nextVal = !isHabitNotifActive;
     const updated = {
       ...notifSettings,
-      enabled: nextVal || isTargetNotifActive,
+      enabled: nextVal ? true : notifSettings.enabled,
       habitReminders: nextVal,
     };
     const saved = saveNotificationSettings(updated);
@@ -115,7 +113,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const nextVal = !isTargetNotifActive;
     const updated = {
       ...notifSettings,
-      enabled: nextVal || isHabitNotifActive,
+      enabled: nextVal ? true : notifSettings.enabled,
       targetReminders: nextVal,
     };
     const saved = saveNotificationSettings(updated);
@@ -742,30 +740,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             }`}>
               Aplikasi ini terikat secara eksklusif dengan akun pribadi Anda. Tautan atau link app dan masuk tidak untuk disebarluaskan akseskan. Jaga akun pribadi Anda demi kenyamanan akun Anda. akun anda akan diblokir apabila Anda menyebarluaskan link.
             </p>
-          </div>
-        </AccordionSection>
-
-        {/* 6. RESET DATA */}
-        <AccordionSection
-          id="backup-reset"
-          isOpen={openSection === 'backup-reset'}
-          onToggle={() => toggleSection('backup-reset')}
-          title="Reset Data"
-          isLight={isLight}
-        >
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={onOpenResetModal}
-              className={`w-full text-xs p-3.5 rounded-2xl flex items-center justify-center gap-2 font-semibold cursor-pointer border transition-all ${
-                isLight
-                  ? 'text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border-rose-200'
-                  : 'text-rose-300 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30'
-              }`}
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>Hapus Data / Reset & Mulai Ulang dari Awal</span>
-            </button>
           </div>
         </AccordionSection>
 

@@ -226,17 +226,25 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
 
         {/* Banner Rekomendasi Supabase Realtime Sync */}
         {onOpenSupabaseModal && (
-          <div className="mx-4 mt-3 p-3 rounded-2xl bg-gradient-to-r from-teal-500/20 via-sky-500/15 to-indigo-500/20 border border-teal-500/40 flex items-center justify-between gap-2 shadow-sm">
+          <div className={`mx-4 mt-3 p-3 rounded-2xl border flex items-center justify-between gap-2 shadow-sm ${
+            isLight
+              ? 'bg-gradient-to-r from-teal-50 via-sky-50 to-indigo-50 border-teal-200'
+              : 'bg-gradient-to-r from-teal-500/20 via-sky-500/15 to-indigo-500/20 border-teal-500/40'
+          }`}>
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-teal-500/30 flex items-center justify-center text-teal-300 shrink-0">
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                isLight ? 'bg-teal-100 text-teal-700' : 'bg-teal-500/30 text-teal-300'
+              }`}>
                 <Database className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                <div className={`text-xs font-bold flex items-center gap-1.5 ${
+                  isLight ? 'text-slate-900' : 'text-white'
+                }`}>
                   <span>Sinkronisasi Supabase Cloud</span>
-                  <span className="text-[10px] text-teal-300 font-normal">Tersedia</span>
+                  <span className={`text-[10px] font-normal ${isLight ? 'text-teal-700' : 'text-teal-300'}`}>Tersedia</span>
                 </div>
-                <div className="text-[11px] text-white/70">
+                <div className={`text-[11px] ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
                   {currentUser ? 'Akun terhubung, data tersinkron otomatis.' : 'Sinkron HP ↔ Laptop otomatis via cloud.'}
                 </div>
               </div>
@@ -246,7 +254,7 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
                 onClose();
                 onOpenSupabaseModal();
               }}
-              className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold shrink-0 transition-all cursor-pointer shadow-sm"
+              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shrink-0 transition-all cursor-pointer shadow-sm"
             >
               {currentUser ? 'Lihat Status' : 'Gunakan Supabase'}
             </button>
@@ -254,12 +262,16 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
         )}
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-white/10 bg-white/[0.01] p-1.5 gap-1.5 mt-2">
+        <div className={`flex border-b p-1.5 gap-1.5 mt-2 ${
+          isLight ? 'border-slate-200 bg-slate-50' : 'border-white/10 bg-white/[0.01]'
+        }`}>
           <button
             onClick={() => setActiveTab('send')}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'send'
                 ? 'bg-gradient-to-r from-teal-500 to-sky-500 text-white shadow-md shadow-teal-500/20'
+                : isLight
+                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 : 'text-white/60 hover:text-white hover:bg-white/5'
             }`}
           >
@@ -271,6 +283,8 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'receive'
                 ? 'bg-gradient-to-r from-teal-500 to-sky-500 text-white shadow-md shadow-teal-500/20'
+                : isLight
+                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 : 'text-white/60 hover:text-white hover:bg-white/5'
             }`}
           >
@@ -284,24 +298,40 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
           {activeTab === 'send' ? (
             <div className="space-y-4">
               {/* Ringkasan Data yang Siap Dipindah */}
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10">
-                <div className="text-xs font-semibold text-white/80 mb-2 flex items-center justify-between">
+              <div className={`p-3.5 rounded-2xl border ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-white/[0.03] border-white/10'
+              }`}>
+                <div className={`text-xs font-semibold mb-2 flex items-center justify-between ${
+                  isLight ? 'text-slate-800' : 'text-white/80'
+                }`}>
                   <span>Data yang Tersimpan di Perangkat Ini:</span>
-                  <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                  <span className={`text-[11px] font-mono flex items-center gap-1 ${
+                    isLight ? 'text-emerald-700' : 'text-emerald-400'
+                  }`}>
                     <ShieldCheck className="w-3.5 h-3.5" /> Lengkap
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-white/70">
-                  <div className="bg-black/30 p-2 rounded-xl border border-white/5">
+                <div className={`grid grid-cols-2 gap-2 text-xs ${
+                  isLight ? 'text-slate-700' : 'text-white/70'
+                }`}>
+                  <div className={`p-2 rounded-xl border ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-black/30 border-white/5'
+                  }`}>
                     📋 <strong>{tasks.length}</strong> Agenda Kegiatan
                   </div>
-                  <div className="bg-black/30 p-2 rounded-xl border border-white/5">
+                  <div className={`p-2 rounded-xl border ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-black/30 border-white/5'
+                  }`}>
                     🔥 <strong>{habits.length}</strong> Target Kebiasaan
                   </div>
-                  <div className="bg-black/30 p-2 rounded-xl border border-white/5">
+                  <div className={`p-2 rounded-xl border ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-black/30 border-white/5'
+                  }`}>
                     💰 <strong>{transactions.length}</strong> Catatan Keuangan
                   </div>
-                  <div className="bg-black/30 p-2 rounded-xl border border-white/5">
+                  <div className={`p-2 rounded-xl border ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-black/30 border-white/5'
+                  }`}>
                     ⚡ <strong>{userProfile.streakDays || 0} Hari</strong> Rekor Streak
                   </div>
                 </div>
@@ -316,7 +346,7 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
                 >
                   {copied ? (
                     <>
-                      <Check className="w-4 h-4 text-emerald-300" />
+                      <Check className="w-4 h-4 text-emerald-200" />
                       <span>Kode Data Berhasil Disalin!</span>
                     </>
                   ) : (
@@ -331,21 +361,33 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={handleDownloadFile}
-                    className="flex-1 py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      isLight
+                        ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                        : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/80 hover:text-white'
+                    }`}
                   >
-                    <Download className="w-3.5 h-3.5 text-teal-400" />
+                    <Download className={`w-3.5 h-3.5 ${isLight ? 'text-teal-700' : 'text-teal-400'}`} />
                     <span>Unduh File .JSON</span>
                   </button>
                 </div>
               </div>
 
               {/* Petunjuk Mudah 3 Langkah */}
-              <div className="p-3.5 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-xs text-teal-200/90 space-y-2">
-                <div className="font-bold text-teal-300 flex items-center gap-1.5">
+              <div className={`p-3.5 rounded-2xl border text-xs space-y-2 ${
+                isLight
+                  ? 'bg-teal-50 border-teal-200 text-slate-700'
+                  : 'bg-teal-500/10 border-teal-500/20 text-teal-200/90'
+              }`}>
+                <div className={`font-bold flex items-center gap-1.5 ${
+                  isLight ? 'text-teal-800' : 'text-teal-300'
+                }`}>
                   <FileCode2 className="w-4 h-4" />
                   <span>Cara memindahkan data ke HP Anda:</span>
                 </div>
-                <ol className="list-decimal list-inside space-y-1 text-white/80 pl-1">
+                <ol className={`list-decimal list-inside space-y-1 pl-1 ${
+                  isLight ? 'text-slate-700' : 'text-white/80'
+                }`}>
                   <li>Klik tombol <strong>"Salin Seluruh Kode Data"</strong> di atas.</li>
                   <li>Kirimkan teks tersebut ke HP Anda (lewat chat WhatsApp ke nomor sendiri, Telegram, atau kirim email).</li>
                   <li>Buka Journal di browser HP Anda, klik menu <strong>Sinkronisasi</strong> ini lalu pilih tab <strong>"Terima di HP"</strong> dan klik <strong>Terapkan</strong>.</li>
@@ -354,7 +396,7 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="text-xs text-white/70">
+              <div className={`text-xs ${isLight ? 'text-slate-700' : 'text-white/70'}`}>
                 Punya kode data yang dikirim dari laptop? Tempelkan teks kode tersebut di bawah ini:
               </div>
 
@@ -367,7 +409,11 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
                     setApplyError('');
                   }}
                   placeholder="Tempelkan teks kode data dari laptop di sini..."
-                  className="w-full text-xs font-mono p-3 bg-black/40 border border-white/15 rounded-2xl text-white/90 placeholder-white/30 focus:border-teal-400 focus:bg-black/60 outline-hidden transition-all resize-none"
+                  className={`w-full text-xs font-mono p-3 border rounded-2xl outline-hidden transition-all resize-none ${
+                    isLight
+                      ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400 focus:border-teal-500 focus:bg-white'
+                      : 'bg-black/40 border-white/15 text-white/90 placeholder-white/30 focus:border-teal-400 focus:bg-black/60'
+                  }`}
                 />
                 
                 {/* Tombol Tempel Cepat */}
@@ -375,7 +421,11 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={handlePasteFromClipboard}
-                    className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-teal-300 hover:text-teal-200 text-[11px] font-semibold flex items-center gap-1 border border-white/10 transition-colors cursor-pointer"
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold flex items-center gap-1 border transition-colors cursor-pointer ${
+                      isLight
+                        ? 'bg-white hover:bg-slate-100 text-teal-800 border-slate-300 shadow-xs'
+                        : 'bg-white/10 hover:bg-white/20 text-teal-300 hover:text-teal-200 border-white/10'
+                    }`}
                   >
                     <Copy className="w-3 h-3" />
                     <span>Tempel Clipboard</span>
@@ -384,16 +434,26 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
               </div>
 
               {applyError && (
-                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">
+                <div className={`p-2.5 rounded-xl border text-xs ${
+                  isLight
+                    ? 'bg-rose-50 border-rose-300 text-rose-800'
+                    : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                }`}>
                   {applyError}
                 </div>
               )}
 
               {/* Opsi Upload File */}
-              <div className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/10 text-xs">
-                <span className="text-white/60">Atau gunakan file .json yang dikirim ke HP:</span>
-                <label className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-medium cursor-pointer transition-colors flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5 text-teal-400" />
+              <div className={`flex items-center justify-between p-3 rounded-2xl border text-xs ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-white/[0.03] border-white/10'
+              }`}>
+                <span className={isLight ? 'text-slate-600' : 'text-white/60'}>Atau gunakan file .json yang dikirim ke HP:</span>
+                <label className={`px-3 py-1.5 rounded-xl font-medium cursor-pointer transition-colors flex items-center gap-1.5 ${
+                  isLight
+                    ? 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-300'
+                    : 'bg-white/10 hover:bg-white/15 text-white'
+                }`}>
+                  <Upload className={`w-3.5 h-3.5 ${isLight ? 'text-teal-700' : 'text-teal-400'}`} />
                   <span>Pilih File</span>
                   <input
                     type="file"

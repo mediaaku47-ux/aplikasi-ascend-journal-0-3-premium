@@ -10,7 +10,7 @@ import { primeMicrophoneStream } from '../utils/voiceRecorder';
 interface NewEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddTask: (task: Task) => void;
+  onAddTask: (task: Task) => void | Promise<void>;
   onAddHabit: (habit: Habit) => void;
   onAddTransaction: (tx: Transaction) => void;
   onAddNote: (note: QuickNote) => void;
@@ -59,6 +59,15 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
   const [noteText, setNoteText] = useState('');
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSubmitError(null);
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
 
   const handleSaveVoiceDirectly = (result: { text: string; audioUrl?: string; duration: number }) => {
     const formattedDate = formatReadableDate(selectedDate);
@@ -93,20 +102,31 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setSubmitError(null);
 
     if (activeType === 'task') {
       if (!taskTitle.trim()) return;
-      onAddTask({
-        id: `task-${Date.now()}`,
-        title: taskTitle.trim(),
-        flagged: taskFlagged,
-        days: {},
-        createdAt: selectedDate,
-      });
-      setTaskTitle('');
-      setTaskFlagged(false);
+      const uniqueSuffix = Math.random().toString(36).slice(2, 7);
+      setIsSubmitting(true);
+      try {
+        await onAddTask({
+          id: `task-${Date.now()}-${uniqueSuffix}`,
+          title: taskTitle.trim(),
+          flagged: taskFlagged,
+          days: {},
+          createdAt: selectedDate,
+        });
+        setTaskTitle('');
+        setTaskFlagged(false);
+      } catch (err: any) {
+        setSubmitError(err?.message || 'Gagal menyimpan agenda ke Supabase.');
+        setIsSubmitting(false);
+        return;
+      }
+      setIsSubmitting(false);
     } else if (activeType === 'habit') {
       if (!habitTitle.trim()) return;
       onAddHabit({
@@ -490,6 +510,14 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
             </div>
           )}
 
+          {submitError && (
+            <div className={`p-3 rounded-xl border text-xs font-semibold ${
+              isLight ? 'bg-rose-50 border-rose-300 text-rose-800' : 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+            }`}>
+              {submitError}
+            </div>
+          )}
+
           <div className={`flex justify-end space-x-2 pt-4 border-t ${isLight ? 'border-slate-200' : 'border-white/10'}`}>
             <button
               type="button"
@@ -500,16 +528,22 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={isSubmitting}
               className={`px-5 py-2.5 text-xs font-semibold text-white ${
                 isLight 
                   ? 'bg-[#003B2F] hover:bg-[#002e24]' 
                   : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-700/25'
-              } rounded-xl shadow-md cursor-pointer transition-all`}
+              } disabled:opacity-50 disabled:cursor-wait rounded-xl shadow-md cursor-pointer transition-all`}
             >
-              {activeType === 'task' && 'Simpan Agenda'}
-              {activeType === 'habit' && 'Simpan Kebiasaan'}
-              {activeType === 'transaction' && 'Simpan Transaksi'}
-              {activeType === 'note' && 'Simpan Catatan'}
+              {isSubmitting
+                ? 'Menyimpan ke Supabase...'
+                : activeType === 'task'
+                ? 'Simpan Agenda'
+                : activeType === 'habit'
+                ? 'Simpan Kebiasaan'
+                : activeType === 'transaction'
+                ? 'Simpan Transaksi'
+                : 'Simpan Catatan'}
             </button>
           </div>
         </form>

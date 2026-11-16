@@ -12,6 +12,7 @@ import {
 interface AgendaViewProps {
   tasks: Task[];
   onUpdateTasks: (tasks: Task[]) => void | Promise<void>;
+  onAddTask?: (task: Task) => void | Promise<void>;
   userProfile: UserProfile;
   onOpenNewEntry: () => void;
   onOpenCloseMonthModal?: () => void;
@@ -22,6 +23,7 @@ interface AgendaViewProps {
 export const AgendaView: React.FC<AgendaViewProps> = ({
   tasks,
   onUpdateTasks,
+  onAddTask,
   userProfile,
   onOpenNewEntry,
   onOpenCloseMonthModal,
@@ -79,10 +81,12 @@ export const AgendaView: React.FC<AgendaViewProps> = ({
     } else {
       const updatedMap = new Map(newFilteredTasks.map((t) => [t.id, t]));
       const filteredIds = new Set(filteredTasks.map((t) => t.id));
+      const existingIds = new Set(tasks.map((t) => t.id));
       const merged = tasks
         .filter((t) => !filteredIds.has(t.id) || updatedMap.has(t.id))
         .map((t) => updatedMap.get(t.id) || t);
-      await onUpdateTasks(merged);
+      const newlyAdded = newFilteredTasks.filter((t) => !existingIds.has(t.id));
+      await onUpdateTasks([...merged, ...newlyAdded]);
     }
   };
 
@@ -229,6 +233,7 @@ export const AgendaView: React.FC<AgendaViewProps> = ({
       <AgendaTable
         tasks={filteredTasks}
         onUpdateTasks={handleUpdateTasks}
+        onAddTask={onAddTask}
         monthName={userProfile.monthName}
         monthIndex={userProfile.monthIndex}
         year={userProfile.year}

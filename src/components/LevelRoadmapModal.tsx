@@ -46,7 +46,9 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
   } = levelProgress;
 
   const getLevelIcon = (iconType: string, isCurrent: boolean) => {
-    const iconClass = `w-5 h-5 ${isCurrent ? 'text-white' : 'text-white/70'}`;
+    const iconClass = `w-5 h-5 ${
+      isLight ? 'text-slate-800' : isCurrent ? 'text-white' : 'text-white/70'
+    }`;
     switch (iconType) {
       case 'compass':
         return <Compass className={iconClass} />;
@@ -111,44 +113,68 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
         </div>
 
         {/* Scrollable Content */}
-        <div className="overflow-y-auto space-y-6 py-4 pr-1 scrollbar-thin scrollbar-thumb-white/10">
+        <div className="overflow-y-auto space-y-6 py-4 pr-1 custom-scrollbar">
           {/* Current Status Highlights */}
-          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 relative overflow-hidden">
+          <div className={`p-4 rounded-2xl border relative overflow-hidden ${
+            isLight ? 'bg-slate-50 border-slate-200' : 'bg-white/[0.03] border-white/10'
+          }`}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <span className="text-[11px] font-semibold text-white/50 uppercase tracking-wider block">
+                <span className={`text-[11px] font-semibold uppercase tracking-wider block ${
+                  isLight ? 'text-slate-500' : 'text-white/50'
+                }`}>
                   Status Level Saat Ini
                 </span>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <span className={`text-base font-bold px-3 py-1 rounded-xl border ${currentLevel.badgeBg} ${currentLevel.badgeBorder} ${currentLevel.badgeText}`}>
                     {currentLevel.title}
                   </span>
-                  <span className="font-mono text-sm font-bold text-white bg-white/5 px-2.5 py-1 rounded-xl border border-white/10">
+                  <span className={`font-mono text-sm font-bold px-2.5 py-1 rounded-xl border ${
+                    isLight
+                      ? 'text-slate-900 bg-white border-slate-200'
+                      : 'text-white bg-white/5 border-white/10'
+                  }`}>
                     {totalPoints} Poin
                   </span>
-                  <span className="font-mono text-sm font-bold text-teal-300 bg-teal-500/10 px-2.5 py-1 rounded-xl border border-teal-500/20">
+                  <span className={`font-mono text-sm font-bold px-2.5 py-1 rounded-xl border ${
+                    isLight
+                      ? 'text-teal-800 bg-teal-50 border-teal-200'
+                      : 'text-teal-300 bg-teal-500/10 border-teal-500/20'
+                  }`}>
                     {levelProgress.effectiveConsistency}% Konsistensi
                   </span>
                 </div>
               </div>
 
               {nextLevel ? (
-                <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/25 max-w-xs">
-                  <span className="text-[11px] text-sky-300 font-semibold flex items-center gap-1.5">
+                <div className={`p-3 rounded-xl border max-w-xs ${
+                  isLight ? 'bg-sky-50 border-sky-200' : 'bg-sky-500/10 border-sky-500/25'
+                }`}>
+                  <span className={`text-[11px] font-semibold flex items-center gap-1.5 ${
+                    isLight ? 'text-sky-800' : 'text-sky-300'
+                  }`}>
                     <Target className="w-3.5 h-3.5" />
                     <span>Target Naik ke {nextLevel.title}</span>
                   </span>
-                  <p className="text-xs text-white/80 mt-1 leading-snug">
+                  <p className={`text-xs mt-1 leading-snug ${
+                    isLight ? 'text-slate-700' : 'text-white/80'
+                  }`}>
                     {levelProgress.requirementReason}
                   </p>
                 </div>
               ) : (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 max-w-xs">
-                  <span className="text-[11px] text-amber-300 font-semibold flex items-center gap-1.5">
+                <div className={`p-3 rounded-xl border max-w-xs ${
+                  isLight ? 'bg-amber-50 border-amber-200' : 'bg-amber-500/10 border-amber-500/25'
+                }`}>
+                  <span className={`text-[11px] font-semibold flex items-center gap-1.5 ${
+                    isLight ? 'text-amber-800' : 'text-amber-300'
+                  }`}>
                     <Crown className="w-3.5 h-3.5" />
                     <span>Puncak Keunggulan</span>
                   </span>
-                  <p className="text-xs text-white/80 mt-1">
+                  <p className={`text-xs mt-1 ${
+                    isLight ? 'text-slate-700' : 'text-white/80'
+                  }`}>
                     Anda telah mencapai level tertinggi! Pertahankan konsistensi harian Anda.
                   </p>
                 </div>
@@ -156,12 +182,14 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
             </div>
 
             {/* Overall Journey Bar */}
-            <div className="mt-4 pt-3 border-t border-white/10">
+            <div className={`mt-4 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-white/10'}`}>
               <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
-                <span className="text-white/70">Perjalanan Level Keseluruhan (1–5)</span>
-                <span className="font-mono font-bold text-sky-300">{overallProgressPercent}%</span>
+                <span className={isLight ? 'text-slate-700' : 'text-white/70'}>Perjalanan Level Keseluruhan (1–5)</span>
+                <span className={`font-mono font-bold ${isLight ? 'text-sky-700' : 'text-sky-300'}`}>{overallProgressPercent}%</span>
               </div>
-              <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden p-0.5 border border-white/10">
+              <div className={`w-full h-2 rounded-full overflow-hidden p-0.5 border ${
+                isLight ? 'bg-slate-200 border-slate-300' : 'bg-black/40 border-white/10'
+              }`}>
                 <div 
                   className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r ${currentLevel.gradient}`}
                   style={{ width: `${Math.max(10, overallProgressPercent)}%` }}
@@ -170,29 +198,39 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
             </div>
 
             {/* Poin breakdown */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-3 border-t border-white/10 text-center">
-              <div className="p-2 rounded-xl bg-white/[0.02] border border-white/5">
-                <span className="text-[10px] text-white/50 block">Poin Agenda Tuntas</span>
-                <span className="text-xs font-mono font-bold text-sky-300">
-                  +{tasksPoints} pts <span className="text-[10px] text-white/40">({doneTasksCount})</span>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-3 border-t text-center ${
+              isLight ? 'border-slate-200' : 'border-white/10'
+            }`}>
+              <div className={`p-2 rounded-xl border ${
+                isLight ? 'bg-white border-slate-200' : 'bg-white/[0.02] border-white/5'
+              }`}>
+                <span className={`text-[10px] block ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Poin Agenda Tuntas</span>
+                <span className={`text-xs font-mono font-bold ${isLight ? 'text-sky-700' : 'text-sky-300'}`}>
+                  +{tasksPoints} pts <span className={`text-[10px] ${isLight ? 'text-slate-400' : 'text-white/40'}`}>({doneTasksCount})</span>
                 </span>
               </div>
-              <div className="p-2 rounded-xl bg-white/[0.02] border border-white/5">
-                <span className="text-[10px] text-white/50 block">Poin Kebiasaan</span>
-                <span className="text-xs font-mono font-bold text-teal-300">
-                  +{habitsPoints} pts <span className="text-[10px] text-white/40">({doneHabitsCount})</span>
+              <div className={`p-2 rounded-xl border ${
+                isLight ? 'bg-white border-slate-200' : 'bg-white/[0.02] border-white/5'
+              }`}>
+                <span className={`text-[10px] block ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Poin Kebiasaan</span>
+                <span className={`text-xs font-mono font-bold ${isLight ? 'text-teal-700' : 'text-teal-300'}`}>
+                  +{habitsPoints} pts <span className={`text-[10px] ${isLight ? 'text-slate-400' : 'text-white/40'}`}>({doneHabitsCount})</span>
                 </span>
               </div>
-              <div className="p-2 rounded-xl bg-white/[0.02] border border-white/5">
-                <span className="text-[10px] text-white/50 block">Bonus Momentum</span>
-                <span className="text-xs font-mono font-bold text-amber-300">
+              <div className={`p-2 rounded-xl border ${
+                isLight ? 'bg-white border-slate-200' : 'bg-white/[0.02] border-white/5'
+              }`}>
+                <span className={`text-[10px] block ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Bonus Momentum</span>
+                <span className={`text-xs font-mono font-bold ${isLight ? 'text-amber-700' : 'text-amber-300'}`}>
                   +{streakPoints} pts
                 </span>
               </div>
-              <div className="p-2 rounded-xl bg-white/[0.02] border border-white/5">
-                <span className="text-[10px] text-white/50 block">Target Tercapai</span>
-                <span className="text-xs font-mono font-bold text-indigo-300">
-                  +{targetsPoints} pts <span className="text-[10px] text-white/40">({completedTargetsCount})</span>
+              <div className={`p-2 rounded-xl border ${
+                isLight ? 'bg-white border-slate-200' : 'bg-white/[0.02] border-white/5'
+              }`}>
+                <span className={`text-[10px] block ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Target Tercapai</span>
+                <span className={`text-xs font-mono font-bold ${isLight ? 'text-indigo-700' : 'text-indigo-300'}`}>
+                  +{targetsPoints} pts <span className={`text-[10px] ${isLight ? 'text-slate-400' : 'text-white/40'}`}>({completedTargetsCount})</span>
                 </span>
               </div>
             </div>
@@ -200,8 +238,10 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
 
           {/* 5 Levels Timeline */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold text-white/60 uppercase tracking-wider flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+            <h4 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
+              isLight ? 'text-slate-600' : 'text-white/60'
+            }`}>
+              <Sparkles className={`w-3.5 h-3.5 ${isLight ? 'text-teal-600' : 'text-sky-400'}`} />
               <span>Daftar Tingkatan Level (Level 1–5)</span>
             </h4>
 
@@ -216,9 +256,15 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
                     key={lvl.level}
                     className={`p-4 rounded-2xl border transition-all relative overflow-hidden ${
                       isCurrent
-                        ? 'bg-white/[0.07] border-sky-400 shadow-md shadow-sky-500/10'
+                        ? isLight
+                          ? 'bg-sky-50/70 border-sky-400 shadow-md shadow-sky-500/10'
+                          : 'bg-white/[0.07] border-sky-400 shadow-md shadow-sky-500/10'
                         : isPassed
-                        ? 'bg-white/[0.02] border-emerald-500/30 opacity-80'
+                        ? isLight
+                          ? 'bg-emerald-50/50 border-emerald-300 opacity-90'
+                          : 'bg-white/[0.02] border-emerald-500/30 opacity-80'
+                        : isLight
+                        ? 'bg-slate-50 border-slate-200 opacity-75'
                         : 'bg-white/[0.01] border-white/5 opacity-50'
                     }`}
                   >
@@ -228,7 +274,7 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
                         <div 
                           className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border"
                           style={{ 
-                            backgroundColor: `${lvl.accentColor}25`,
+                            backgroundColor: isLight ? `${lvl.accentColor}20` : `${lvl.accentColor}25`,
                             borderColor: `${lvl.accentColor}50` 
                           }}
                         >
@@ -236,8 +282,8 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
                         </div>
 
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-white">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
                               {lvl.title}
                             </span>
                             {isCurrent && (
@@ -246,39 +292,53 @@ export const LevelRoadmapModal: React.FC<LevelRoadmapModalProps> = ({
                               </span>
                             )}
                             {isPassed && (
-                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                                isLight
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              }`}>
                                 <Check className="w-2.5 h-2.5" />
                                 <span>Tercapai</span>
                               </span>
                             )}
                             {isLocked && (
-                              <span className="text-[10px] text-white/40 flex items-center gap-1">
+                              <span className={`text-[10px] flex items-center gap-1 ${
+                                isLight ? 'text-slate-500' : 'text-white/40'
+                              }`}>
                                 <Lock className="w-2.5 h-2.5" />
                                 <span>Terkunci</span>
                               </span>
                             )}
                           </div>
-                          <span className="text-[11px] font-mono text-white/50 block">
+                          <span className={`text-[11px] font-mono block ${
+                            isLight ? 'text-slate-600' : 'text-white/50'
+                          }`}>
                             Syarat: Konsistensi ≥{lvl.minConsistency}% • Min. {lvl.minDoneTasks} tugas • {lvl.minPoints}{lvl.maxPoints < 999999 ? ` - ${lvl.maxPoints} poin` : '+ poin'}
                           </span>
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <span className="text-xs text-white/70 font-medium">
+                      <div className="sm:text-right">
+                        <span className={`text-xs font-medium ${isLight ? 'text-slate-700' : 'text-white/70'}`}>
                           {lvl.description}
                         </span>
                       </div>
                     </div>
 
                     {/* Perks list */}
-                    <div className="mt-2 pt-2 border-t border-white/5 flex flex-wrap gap-1.5">
+                    <div className={`mt-2 pt-2 border-t flex flex-wrap gap-1.5 ${
+                      isLight ? 'border-slate-200/80' : 'border-white/5'
+                    }`}>
                       {lvl.perks.map((perk, pIdx) => (
                         <span 
                           key={pIdx}
-                          className="text-[10px] text-white/60 bg-white/5 px-2 py-0.5 rounded-md flex items-center gap-1"
+                          className={`text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1 ${
+                            isLight
+                              ? 'text-slate-700 bg-white border border-slate-200'
+                              : 'text-white/60 bg-white/5'
+                          }`}
                         >
-                          <CheckCircle2 className="w-2.5 h-2.5 text-sky-400" />
+                          <CheckCircle2 className={`w-2.5 h-2.5 ${isLight ? 'text-teal-600' : 'text-sky-400'}`} />
                           <span>{perk}</span>
                         </span>
                       ))}
