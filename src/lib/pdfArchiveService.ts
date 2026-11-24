@@ -346,7 +346,7 @@ export async function archiveMonthAndReset(options: ArchiveMonthOptions): Promis
           console.info(
             `[Supabase Storage] Pengguna menggunakan akun tamu/lokal atau kebijakan RLS membatasi upload anonim. Menyimpan berkas PDF dengan aman di IndexedDB perangkat lokal.`
           );
-          currentReport.errorLog = 'Tersimpan aman di penyimpanan lokal perangkat (Mode Tamu / RLS Supabase). Masuk ke akun Supabase di menu Sinkronisasi jika ingin mencadangkan ke cloud.';
+          currentReport.errorLog = 'Tersimpan aman di penyimpanan lokal perangkat (Mode Tamu / Akses Terbatas). Masuk ke akun cloud di menu Sinkronisasi jika ingin mencadangkan ke cloud.';
         } else if (!uploadSuccess) {
           console.warn(`[Supabase Storage] Upload cloud gagal (${uploadError.message}), berkas diamankan di IndexedDB lokal.`);
           currentReport.errorLog = `Tersimpan aman di perangkat lokal (${uploadError.message})`;
@@ -428,7 +428,7 @@ export async function archiveMonthAndReset(options: ArchiveMonthOptions): Promis
     }
 
     const resultMessage = uploadSuccess
-      ? `Bulan ${monthName} ${cleanYear} berhasil diarsipkan ke Supabase Storage (monthly-reports) dan ditutup dengan aman!`
+      ? `Bulan ${monthName} ${cleanYear} berhasil diarsipkan ke penyimpanan cloud dan ditutup dengan aman!`
       : `Bulan ${monthName} ${cleanYear} berhasil diarsipkan ke PDF dan diamankan di penyimpanan perangkat Anda!`;
 
     return {

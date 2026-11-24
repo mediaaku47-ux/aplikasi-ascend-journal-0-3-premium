@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   LayoutGrid, 
   Calendar, 
+  CalendarDays,
   CheckCircle2, 
   Landmark, 
   TrendingUp, 
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import { NavTab, UserProfile } from '../types';
 import { User } from '@supabase/supabase-js';
-import { AppLogo } from './AppLogo';
+import { AscendBrand } from './AscendBrand';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -44,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dasbor Awal', icon: LayoutGrid },
     { id: 'agenda' as NavTab, label: 'Agenda Harian', icon: Calendar },
+    { id: 'calendar' as NavTab, label: 'Kalender Acara', icon: CalendarDays },
     { id: 'habits' as NavTab, label: 'Pelacak Kebiasaan', icon: CheckCircle2 },
     { id: 'finance' as NavTab, label: 'Keuangan & Kas', icon: Landmark },
     { id: 'progress' as NavTab, label: 'Perkembangan', icon: TrendingUp },
@@ -66,26 +68,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         isLight ? 'border-teal-500/25' : 'border-[#263449]'
       }`}>
         {activeTab === 'dashboard' ? (
-          <div 
+          <AscendBrand
+            size="md"
+            theme="dark"
             onClick={() => onTabChange('dashboard')}
-            className="flex items-center gap-3 cursor-pointer group"
-            title="Ke Dasbor Awal ASCEND Journal"
-          >
-            <AppLogo size="md" showBadgeDot={false} className="group-hover:scale-105 transition-transform" />
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-['Montserrat',sans-serif] font-bold text-[15.5px] tracking-[0.14em] uppercase text-[#F59E0B] leading-none">
-                  ASCEND
-                </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] shadow-[0_0_6px_#F59E0B]" />
-              </div>
-              <span className={`font-['Montserrat',sans-serif] font-medium text-[10px] tracking-[0.3em] uppercase mt-1 ${
-                isLight ? 'text-[#5EEAD4]' : 'text-cyan-400'
-              }`}>
-                JOURNAL
-              </span>
-            </div>
-          </div>
+            showDot={false}
+          />
         ) : (
           <div className="flex items-center gap-2.5 min-w-0">
             <button

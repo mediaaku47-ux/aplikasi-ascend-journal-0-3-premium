@@ -892,6 +892,90 @@ const isPermissionAlreadyGranted = async (name: 'microphone' | 'camera'): Promis
 };
 
 /**
+ * Memeriksa status izin mikrofon dan kamera saat ini tanpa memicu pop-up.
+ */
+export async function getMicrophoneAndCameraPermissionStatus(): Promise<{
+  microphone: boolean;
+  camera: boolean;
+}> {
+  const [microphone, camera] = await Promise.all([
+    isPermissionAlreadyGranted('microphone'),
+    isPermissionAlreadyGranted('camera'),
+  ]);
+  return { microphone, camera };
+}
+
+/**
+ * Meminta izin resmi browser untuk Mikrofon (Audio) dan Kamera (Video) secara aman,
+ * lalu segera menghentikan track media agar indikator kamera/mikrofon tidak tetap menyala.
+ */
+export async function requestMicrophoneAndCameraPermissions(): Promise<{
+  microphone: boolean;
+  camera: boolean;
+}> {
+  const initial = await getMicrophoneAndCameraPermissionStatus();
+  let micGranted = initial.microphone;
+  let camGranted = initial.camera;
+
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return { microphone: micGranted, camera: camGranted };
+  }
+
+  const needAudio = !micGranted;
+  const needCamera = !camGranted;
+
+  if (needAudio || needCamera) {
+    let combinedStream: MediaStream | null = null;
+    try {
+      combinedStream = await navigator.mediaDevices.getUserMedia({
+        audio: needAudio,
+        video: needCamera,
+      });
+      if (needAudio) micGranted = true;
+      if (needCamera) camGranted = true;
+    } catch {
+      stopMediaTracksSafe(combinedStream);
+      combinedStream = null;
+
+      if (needAudio) {
+        let audioStream: MediaStream | null = null;
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          micGranted = true;
+        } catch {
+          micGranted = false;
+        } finally {
+          stopMediaTracksSafe(audioStream);
+        }
+      }
+
+      if (needCamera) {
+        let videoStream: MediaStream | null = null;
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          camGranted = true;
+        } catch {
+          camGranted = false;
+        } finally {
+          stopMediaTracksSafe(videoStream);
+        }
+      }
+    } finally {
+      stopMediaTracksSafe(combinedStream);
+    }
+  }
+
+  try {
+    localStorage.setItem(
+      'ascend_device_media_permissions',
+      JSON.stringify({ microphone: micGranted, camera: camGranted })
+    );
+  } catch {}
+
+  return { microphone: micGranted, camera: camGranted };
+}
+
+/**
  * Langsung memunculkan dialog izin resmi browser untuk Notifikasi, Audio (Mikrofon), dan Kamera
  * saat pengguna baru masuk tanpa menampilkan kartu/modal perantara.
  */
@@ -915,50 +999,7 @@ export async function requestInitialDevicePermissions(): Promise<void> {
     }
 
     // 2. Langsung minta izin Audio (Mikrofon) & Kamera jika belum granted
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      const [micGranted, camGranted] = await Promise.all([
-        isPermissionAlreadyGranted('microphone'),
-        isPermissionAlreadyGranted('camera'),
-      ]);
-
-      const needAudio = !micGranted;
-      const needCamera = !camGranted;
-
-      if (needAudio || needCamera) {
-        let combinedStream: MediaStream | null = null;
-        try {
-          combinedStream = await navigator.mediaDevices.getUserMedia({
-            audio: needAudio,
-            video: needCamera,
-          });
-        } catch {
-          stopMediaTracksSafe(combinedStream);
-          combinedStream = null;
-
-          if (needAudio) {
-            let audioStream: MediaStream | null = null;
-            try {
-              audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch {
-            } finally {
-              stopMediaTracksSafe(audioStream);
-            }
-          }
-
-          if (needCamera) {
-            let videoStream: MediaStream | null = null;
-            try {
-              videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            } catch {
-            } finally {
-              stopMediaTracksSafe(videoStream);
-            }
-          }
-        } finally {
-          stopMediaTracksSafe(combinedStream);
-        }
-      }
-    }
+    await requestMicrophoneAndCameraPermissions();
 
     try {
       localStorage.setItem(INITIAL_PERMISSIONS_PROMPTED_KEY, 'true');

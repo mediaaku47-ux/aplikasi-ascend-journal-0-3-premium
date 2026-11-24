@@ -12,15 +12,120 @@ interface AddHabitModalProps {
 
 // Rekomendasi kebiasaan siap pakai
 const HABIT_TEMPLATES = [
-  { title: '💧 Minum Air 2 Liter', days: 7, color: '#0ea5e9', category: 'Kesehatan' },
-  { title: '🏃 Olahraga 30 Menit', days: 14, color: '#ea580c', category: 'Kebugaran' },
-  { title: '📖 Membaca Buku 15 Menit', days: 21, color: '#8b5cf6', category: 'Pengembangan Diri' },
-  { title: '🧘 Meditasi Pagi', days: 7, color: '#10b981', category: 'Mindset' },
-  { title: '💤 Tidur Tepat Waktu', days: 14, color: '#6366f1', category: 'Kesehatan' },
-  { title: '💻 Belajar Keterampilan Baru', days: 30, color: '#f59e0b', category: 'Produktivitas' },
-  { title: '🥗 Pola Makan Sehat', days: 21, color: '#10b981', category: 'Kesehatan' },
-  { title: '✍️ Tulis Jurnal Refleksi', days: 7, color: '#ec4899', category: 'Mindset' },
+  {
+    title: '💧 Minum Air 2 Liter',
+    days: 7,
+    color: '#0ea5e9',
+    category: 'Kesehatan',
+    keywords: ['minum', 'air', 'liter', '2l', 'hidrasi', 'haus'],
+  },
+  {
+    title: '🏃 Olahraga 30 Menit',
+    days: 14,
+    color: '#ea580c',
+    category: 'Kebugaran',
+    keywords: ['olahraga', 'lari', 'jogging', 'workout', 'gym', 'senam', 'fitnes', 'fisik'],
+  },
+  {
+    title: '📖 Membaca Buku 15 Menit',
+    days: 21,
+    color: '#8b5cf6',
+    category: 'Pengembangan Diri',
+    keywords: ['baca', 'membaca', 'buku', 'literasi', 'novel'],
+  },
+  {
+    title: '🧘 Meditasi Pagi',
+    days: 7,
+    color: '#10b981',
+    category: 'Mindset',
+    keywords: ['meditasi', 'pagi', 'tenang', 'mindfulness', 'relaksasi', 'napas'],
+  },
+  {
+    title: '💤 Tidur Tepat Waktu',
+    days: 14,
+    color: '#6366f1',
+    category: 'Kesehatan',
+    keywords: ['tidur', 'istirahat', 'malam', 'begadang', 'tepat'],
+  },
+  {
+    title: '💻 Belajar Keterampilan Baru',
+    days: 30,
+    color: '#f59e0b',
+    category: 'Produktivitas',
+    keywords: ['belajar', 'keterampilan', 'skill', 'kursus', 'latihan', 'coding'],
+  },
+  {
+    title: '🥗 Pola Makan Sehat',
+    days: 21,
+    color: '#10b981',
+    category: 'Kesehatan',
+    keywords: ['pola', 'makan', 'sehat', 'diet', 'sayur', 'buah', 'nutrisi'],
+  },
+  {
+    title: '✍️ Tulis Jurnal Refleksi',
+    days: 7,
+    color: '#ec4899',
+    category: 'Mindset',
+    keywords: ['tulis', 'menulis', 'jurnal', 'refleksi', 'catatan', 'diary'],
+  },
 ];
+
+const normalizeHabitSearchText = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const isWithinOneEdit = (a: string, b: string): boolean => {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+    } else {
+      edits++;
+      if (edits > 1) return false;
+      if (a.length > b.length) i++;
+      else if (b.length > a.length) j++;
+      else {
+        i++;
+        j++;
+      }
+    }
+  }
+  if (i < a.length || j < b.length) edits++;
+  return edits <= 1;
+};
+
+const getMatchingHabitTemplates = (input: string) => {
+  const query = normalizeHabitSearchText(input);
+  if (query.length < 2) return [];
+
+  const tokens = query.split(' ').filter((t) => t.length >= 2);
+  if (tokens.length === 0) return [];
+
+  return HABIT_TEMPLATES.filter((tpl) => {
+    const cleanTitle = normalizeHabitSearchText(tpl.title);
+    if (cleanTitle.includes(query)) return true;
+
+    const searchTerms = Array.from(
+      new Set([...cleanTitle.split(' ').filter((w) => w.length >= 2), ...tpl.keywords])
+    );
+
+    return tokens.every((token) =>
+      searchTerms.some(
+        (term) =>
+          term.includes(token) ||
+          (token.length >= 3 && term.length >= 3 && token.includes(term)) ||
+          (token.length >= 4 && term.length >= 4 && isWithinOneEdit(token, term))
+      )
+    );
+  });
+};
 
 const PRESET_DURATIONS = [
   { days: 7, label: '7 Hari', sub: '1 Minggu' },
@@ -76,6 +181,7 @@ export const AddHabitModal: React.FC<AddHabitModalProps> = ({
   if (!isOpen) return null;
 
   const totalDays = isCustomDuration ? (parseInt(customDays, 10) || 7) : selectedDuration;
+  const matchedTemplates = getMatchingHabitTemplates(title);
 
   const handleSelectTemplate = (tpl: typeof HABIT_TEMPLATES[0]) => {
     // Hilangkan emoji di awal jika user mau, atau biarkan lengkap
@@ -190,33 +296,35 @@ export const AddHabitModal: React.FC<AddHabitModalProps> = ({
             </div>
           </div>
 
-          {/* Template Pilihan Cepat */}
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Inspirasi Kebiasaan Populer</span>
+          {/* Template Pilihan Cepat (hanya tampil saat input mendekati inspirasi populer) */}
+          {matchedTemplates.length > 0 && (
+            <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Inspirasi Kebiasaan Populer</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                {matchedTemplates.map((tpl) => (
+                  <button
+                    key={tpl.title}
+                    type="button"
+                    onClick={() => handleSelectTemplate(tpl)}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-left ${
+                      title === tpl.title
+                        ? isLight
+                          ? 'bg-[#003B2F] text-white border-[#003B2F] shadow-xs'
+                          : 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-xs'
+                        : isLight
+                        ? 'bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-slate-200/60'
+                        : 'bg-slate-800/40 hover:bg-slate-800 text-slate-300 border-slate-700/50'
+                    }`}
+                  >
+                    {tpl.title}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-              {HABIT_TEMPLATES.map((tpl, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectTemplate(tpl)}
-                  className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-left ${
-                    title === tpl.title
-                      ? isLight
-                        ? 'bg-[#003B2F] text-white border-[#003B2F] shadow-xs'
-                        : 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-xs'
-                      : isLight
-                      ? 'bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-slate-200/60'
-                      : 'bg-slate-800/40 hover:bg-slate-800 text-slate-300 border-slate-700/50'
-                  }`}
-                >
-                  {tpl.title}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* 2. Target Durasi Hari */}
           <div className="space-y-2">

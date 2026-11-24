@@ -2,13 +2,50 @@ import { useState, useEffect, useCallback } from 'react';
 import { AuthScreen } from './components/AuthScreen';
 import { MainDashboard } from './components/MainDashboard';
 import { AppEntryChoiceModal } from './components/AppEntryChoiceModal';
-import { authService, dbService } from './lib/supabaseService';
+import { TypeformOnboarding, OnboardingResult } from './components/TypeformOnboarding';
+import { authService, dbService, isValidSupabaseUserId } from './lib/supabaseService';
 import { isSupabaseConfigured } from './lib/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
-import { UserProfile } from './types';
+import { OnboardingFocus, UserProfile } from './types';
+import { initialUserProfile } from './data/initialData';
+import { getRealToday } from './utils/dateUtils';
 import { CheckCircle2 } from 'lucide-react';
 import { usePWAInstall } from './hooks/usePWAInstall';
-import { requestInitialDevicePermissions } from './utils/notifications';
+
+const ONBOARDING_DONE_KEY = 'ascend_onboarding_v1_completed';
+
+const getFocusGreetingSubtitle = (focus: OnboardingFocus): string => {
+  switch (focus) {
+    case 'productivity':
+      return 'Fokus menuntaskan agenda harian dan target prioritas Anda hari ini.';
+    case 'habits':
+      return 'Jaga konsistensi rutinitas harian dan pertahankan streak terbaik Anda.';
+    case 'finance':
+      return 'Pantau arus kas, pengeluaran, dan perkembangan tabungan Anda dengan rapi.';
+    default:
+      return 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.';
+  }
+};
+
+const getOnboardingStorageKey = (userId?: string) =>
+  userId ? `${ONBOARDING_DONE_KEY}_${userId}` : ONBOARDING_DONE_KEY;
+
+const hasCompletedOnboardingForUser = (user?: SupabaseUser | null): boolean => {
+  if (typeof window === 'undefined') return false;
+  if (user?.user_metadata?.onboarding_completed === true) {
+    return true;
+  }
+  try {
+    const userKey = getOnboardingStorageKey(user?.id);
+    if (localStorage.getItem(userKey) === 'true') return true;
+    if (!isValidSupabaseUserId(user?.id) && localStorage.getItem(ONBOARDING_DONE_KEY) === 'true') {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
 
 const getFallbackDefaultUser = (): SupabaseUser => {
   let createdAt = '';
@@ -62,6 +99,16 @@ export default function App() {
     }
   });
 
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean>(() => {
+    try {
+      const cachedUserRaw = localStorage.getItem('journalstream_current_user');
+      const cachedUser = cachedUserRaw ? (JSON.parse(cachedUserRaw) as SupabaseUser) : null;
+      return !hasCompletedOnboardingForUser(cachedUser);
+    } catch {
+      return true;
+    }
+  });
+
   const [openedViaInstallAction] = useState<boolean>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -73,6 +120,7 @@ export default function App() {
 
   const [showEntryChoiceModal, setShowEntryChoiceModal] = useState<boolean>(openedViaInstallAction);
 
+  const [pendingForceOnboarding, setPendingForceOnboarding] = useState<boolean>(false);
   const [pendingWelcomeToast, setPendingWelcomeToast] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -114,6 +162,14 @@ export default function App() {
           localStorage.setItem('journalstream_current_user', JSON.stringify(session.user));
         } catch {}
 
+        if (session.user.user_metadata?.onboarding_completed === true) {
+          try {
+            localStorage.setItem(getOnboardingStorageKey(session.user.id), 'true');
+            localStorage.setItem(ONBOARDING_DONE_KEY, 'true');
+          } catch {}
+          setNeedsOnboarding(false);
+        }
+
         const profile = await dbService.ensureUserProfileInitialized(
           session.user.id,
           session.user.email,
@@ -121,7 +177,18 @@ export default function App() {
         ).catch(() => null);
 
         if (isMounted && profile) {
-          setCurrentProfile(profile);
+          setCurrentProfile((prev) => ({
+            ...profile,
+            primaryFocus: prev?.primaryFocus ?? session.user.user_metadata?.primary_focus,
+            reminderEnabled:
+              prev?.reminderEnabled ?? session.user.user_metadata?.reminder_enabled,
+            notificationPermission:
+              prev?.notificationPermission ??
+              session.user.user_metadata?.notification_permission,
+            onboardingCompleted:
+              prev?.onboardingCompleted ??
+              Boolean(session.user.user_metadata?.onboarding_completed),
+          }));
           try {
             localStorage.setItem('journalstream_user_profile', JSON.stringify(profile));
           } catch {}
@@ -155,6 +222,14 @@ export default function App() {
             setIsAuthFlowOpen(false);
           }
 
+          if (user.user_metadata?.onboarding_completed === true) {
+            try {
+              localStorage.setItem(getOnboardingStorageKey(user.id), 'true');
+              localStorage.setItem(ONBOARDING_DONE_KEY, 'true');
+            } catch {}
+            setNeedsOnboarding(false);
+          }
+
           try {
             const profile = await dbService.ensureUserProfileInitialized(
               user.id,
@@ -183,7 +258,7 @@ export default function App() {
   }, []);
 
   const completeEntryAndOpenDashboard = useCallback(
-    (welcomeText?: string) => {
+    (welcomeText?: string, forceOnboarding?: boolean, userOverride?: SupabaseUser) => {
       setShowEntryChoiceModal(false);
 
       const hasAuthenticatedSession = (() => {
@@ -203,19 +278,34 @@ export default function App() {
         try {
           localStorage.setItem('journalstream_has_completed_welcome', 'true');
         } catch {}
-        void requestInitialDevicePermissions();
-        const msg = welcomeText || pendingWelcomeToast;
-        if (msg) {
+
+        const targetUser = userOverride || currentUser;
+        const shouldRunOnboarding =
+          forceOnboarding || pendingForceOnboarding || !hasCompletedOnboardingForUser(targetUser);
+
+        setPendingForceOnboarding(false);
+        if (shouldRunOnboarding) {
+          setNeedsOnboarding(true);
           setPendingWelcomeToast(null);
-          showToast(msg);
+        } else {
+          setNeedsOnboarding(false);
+          const msg = welcomeText || pendingWelcomeToast;
+          if (msg) {
+            setPendingWelcomeToast(null);
+            showToast(msg);
+          }
         }
       }
     },
-    [pendingWelcomeToast, showToast]
+    [currentUser, pendingForceOnboarding, pendingWelcomeToast, showToast]
   );
 
   // Callback setelah pengguna berhasil Login atau Daftar akun dari form
-  const handleAuthSuccess = (user: SupabaseUser, initialProf?: UserProfile) => {
+  const handleAuthSuccess = (
+    user: SupabaseUser,
+    initialProf?: UserProfile,
+    meta?: { isNewUser?: boolean }
+  ) => {
     setCurrentUser(user);
     try {
       localStorage.setItem('journalstream_current_user', JSON.stringify(user));
@@ -227,15 +317,18 @@ export default function App() {
       } catch {}
     }
 
+    const isNewRegistration = Boolean(meta?.isNewUser);
+    setPendingForceOnboarding(isNewRegistration);
+    if (isNewRegistration) {
+      setNeedsOnboarding(true);
+    } else {
+      setNeedsOnboarding(!hasCompletedOnboardingForUser(user));
+    }
+
     const displayName = user.user_metadata?.full_name || user.email || 'Pengguna';
     const welcomeMsg = `Selamat datang, ${displayName}!`;
 
-    if (isInstalled) {
-      completeEntryAndOpenDashboard(welcomeMsg);
-    } else {
-      setPendingWelcomeToast(welcomeMsg);
-      setShowEntryChoiceModal(true);
-    }
+    completeEntryAndOpenDashboard(welcomeMsg, isNewRegistration, user);
   };
 
   const handleContinueAsGuest = () => {
@@ -250,14 +343,72 @@ export default function App() {
       }
     } catch {}
 
+    setPendingForceOnboarding(true);
+    setNeedsOnboarding(true);
     const welcomeMsg = 'Selamat datang di Ascend Journal! (Mode Tamu)';
-    if (isInstalled) {
-      completeEntryAndOpenDashboard(welcomeMsg);
-    } else {
-      setPendingWelcomeToast(welcomeMsg);
-      setShowEntryChoiceModal(true);
-    }
+    completeEntryAndOpenDashboard(welcomeMsg, true);
   };
+
+  const handleOnboardingComplete = useCallback(
+    (result: OnboardingResult) => {
+      const realToday = getRealToday();
+      const baseProfile: UserProfile = currentProfile || {
+        ...initialUserProfile,
+        monthIndex: realToday.monthIndex,
+        year: realToday.year,
+        monthName: realToday.monthName,
+        totalDaysInMonth: realToday.totalDaysInMonth,
+        selectedDay: realToday.day,
+      };
+
+      const completedAt = new Date().toISOString();
+      const updatedProfile: UserProfile = {
+        ...baseProfile,
+        name: result.nickname,
+        email: currentUser?.email || baseProfile.email,
+        greetingTitle: `Selamat Datang, ${result.nickname}`,
+        greetingSubtitle: getFocusGreetingSubtitle(result.primaryFocus),
+        primaryFocus: result.primaryFocus,
+        reminderEnabled: result.reminderEnabled,
+        notificationPermission: result.notificationPermission,
+        onboardingCompleted: true,
+        onboardingCompletedAt: completedAt,
+      };
+
+      const updatedUser: SupabaseUser = {
+        ...currentUser,
+        user_metadata: {
+          ...currentUser.user_metadata,
+          full_name: result.nickname,
+          name: result.nickname,
+          primary_focus: result.primaryFocus,
+          reminder_enabled: result.reminderEnabled,
+          notification_permission: result.notificationPermission,
+          onboarding_completed: true,
+          onboarding_completed_at: completedAt,
+        },
+      };
+
+      setCurrentProfile(updatedProfile);
+      setCurrentUser(updatedUser);
+
+      try {
+        localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+        localStorage.setItem('journalstream_current_user', JSON.stringify(updatedUser));
+        localStorage.setItem(getOnboardingStorageKey(currentUser?.id), 'true');
+        localStorage.setItem(ONBOARDING_DONE_KEY, 'true');
+        localStorage.setItem('ascend_initial_permissions_prompted', 'true');
+      } catch {}
+
+      if (isValidSupabaseUserId(currentUser?.id) && isSupabaseConfigured()) {
+        void dbService.syncOnboardingPreferences(currentUser.id, updatedProfile);
+      }
+
+      setNeedsOnboarding(false);
+      showToast(`Selamat datang, ${result.nickname}! Ruang kerja Anda siap.`);
+    },
+    [currentProfile, currentUser, showToast]
+  );
 
   const handleUserChange = useCallback((user: SupabaseUser | null) => {
     if (user) {
@@ -284,11 +435,13 @@ export default function App() {
       setCurrentProfile(null);
       setShowEntryChoiceModal(false);
       setPendingWelcomeToast(null);
+      setNeedsOnboarding(true);
       setIsAuthFlowOpen(true);
       try {
         localStorage.removeItem('journalstream_current_user');
         localStorage.removeItem('journalstream_has_completed_welcome');
         localStorage.removeItem('ascend_initial_permissions_prompted');
+        localStorage.removeItem(ONBOARDING_DONE_KEY);
       } catch {}
       showToast('Berhasil keluar dari akun. Sampai jumpa kembali!');
     }
@@ -303,8 +456,18 @@ export default function App() {
           showToast={showToast}
           onContinueAsGuest={handleContinueAsGuest}
         />
+      ) : needsOnboarding ? (
+        /* 2. Alur Onboarding Interaktif Bergaya Typeform sebelum masuk ke Dasbor Utama */
+        <TypeformOnboarding
+          initialName={
+            currentProfile?.name ||
+            currentUser?.user_metadata?.full_name ||
+            currentUser?.user_metadata?.name
+          }
+          onComplete={handleOnboardingComplete}
+        />
       ) : (
-        /* 2. Komponen <MainDashboard /> LANGSUNG dirender tanpa loading progress bar */
+        /* 3. Komponen <MainDashboard /> langsung dirender setelah onboarding selesai */
         <MainDashboard
           currentUser={currentUser}
           initialProfile={currentProfile}

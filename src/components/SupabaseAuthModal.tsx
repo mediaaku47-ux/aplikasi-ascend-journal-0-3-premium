@@ -140,7 +140,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConfigured) {
-      setErrorMessage('Konfigurasi Supabase URL & Anon Key belum diatur. Silakan isi di tab Konfigurasi terlebih dahulu.');
+      setErrorMessage('Konfigurasi koneksi cloud belum diatur. Silakan isi di tab Koneksi terlebih dahulu.');
       setActiveTab('config');
       return;
     }
@@ -157,7 +157,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         const cloudData = await dbService.fetchAllUserData(data.user.id);
         if (cloudData && (cloudData.tasks?.length || cloudData.quickNotes?.length || cloudData.transactions?.length)) {
           onApplyCloudData(cloudData);
-          showToast('Data akun dari Supabase berhasil disinkronkan ke perangkat ini!');
+          showToast('Data akun dari cloud berhasil disinkronkan ke perangkat ini!');
         } else {
           // If cloud has no data yet, offer/auto-upload current local data
           await dbService.uploadAllLocalData(data.user.id, {
@@ -169,7 +169,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             targets,
             totalBalance,
           });
-          showToast('Data lokal Anda telah diamankan & diunggah ke Supabase Cloud!');
+          showToast('Data lokal Anda telah diamankan & diunggah ke Cloud!');
         }
       } catch (fetchErr) {
         console.warn('Initial cloud sync notice:', fetchErr);
@@ -187,7 +187,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConfigured) {
-      setErrorMessage('Konfigurasi Supabase URL & Anon Key belum diatur. Silakan isi di tab Konfigurasi terlebih dahulu.');
+      setErrorMessage('Konfigurasi koneksi cloud belum diatur. Silakan isi di tab Koneksi terlebih dahulu.');
       setActiveTab('config');
       return;
     }
@@ -220,7 +220,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             targets,
             totalBalance,
           });
-          showToast('Data lokal berhasil ditautkan ke akun Supabase baru Anda!');
+          showToast('Data lokal berhasil ditautkan ke akun cloud baru Anda!');
         } catch (uploadErr) {
           console.warn('Upload after register error:', uploadErr);
         }
@@ -242,7 +242,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     try {
       await authService.signOut();
       onUserChange(null);
-      showToast('Anda telah keluar dari akun Supabase.');
+      showToast('Anda telah keluar dari akun cloud.');
       setActiveTab('login');
     } catch (err: any) {
       setErrorMessage(err?.message || 'Gagal logout.');
@@ -265,9 +265,9 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         targets,
         totalBalance,
       });
-      showToast('Semua data (Agenda, Jurnal, Kebiasaan, Dompet, Target) berhasil diunggah ke Supabase Cloud!');
+      showToast('Semua data (Agenda, Jurnal, Kebiasaan, Dompet, Target) berhasil diunggah ke Cloud!');
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Gagal mengunggah data ke Supabase.');
+      setErrorMessage(err?.message || 'Gagal mengunggah data ke cloud.');
     } finally {
       setIsLoading(false);
     }
@@ -281,34 +281,34 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
       const cloudData = await dbService.fetchAllUserData(currentUser.id);
       if (cloudData) {
         onApplyCloudData(cloudData);
-        showToast('Data terbaru dari Supabase Cloud berhasil ditarik ke perangkat ini!');
+        showToast('Data terbaru dari Cloud berhasil ditarik ke perangkat ini!');
       } else {
         showToast('Belum ada data tersimpan di cloud untuk akun ini.');
       }
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Gagal mengambil data dari Supabase.');
+      setErrorMessage(err?.message || 'Gagal mengambil data dari cloud.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Save Supabase Configuration
+  // Save Cloud Configuration
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
     if (!configUrl || !configAnonKey) {
-      setErrorMessage('Harap isi Supabase Project URL dan Anon Key.');
+      setErrorMessage('Harap isi alamat URL Server dan Kunci API.');
       return;
     }
 
     const ok = saveCustomSupabaseConfig(configUrl, configAnonKey);
     if (ok) {
-      showToast('Konfigurasi Supabase berhasil disimpan!');
-      setSuccessMessage('Supabase siap digunakan.');
+      showToast('Konfigurasi koneksi cloud berhasil disimpan!');
+      setSuccessMessage('Koneksi cloud siap digunakan.');
       setTimeout(() => {
         setActiveTab(currentUser ? 'account' : 'login');
       }, 800);
     } else {
-      setErrorMessage(getLastConfigError() || 'URL atau Anon Key tidak valid.');
+      setErrorMessage(getLastConfigError() || 'URL atau Kunci API tidak valid.');
     }
   };
 
@@ -319,7 +319,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         await navigator.clipboard.writeText(SCHEMA_SQL_CONTENT);
       }
       setCopiedSql(true);
-      showToast('Skrip schema.sql berhasil disalin ke clipboard! Jalankan di SQL Editor Supabase Anda.');
+      showToast('Skrip schema.sql berhasil disalin ke clipboard! Jalankan di SQL Editor server Anda.');
       setTimeout(() => setCopiedSql(false), 3000);
     } catch (e) {
       showToast('Gagal menyalin otomatis, silakan unduh file schema.sql.');
@@ -348,7 +348,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
   const handleRunMigration = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dbPassword.trim()) {
-      showToast('Masukkan password database PostgreSQL Supabase Anda.');
+      showToast('Masukkan password database PostgreSQL Anda.');
       return;
     }
 
@@ -385,7 +385,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-xl font-bold text-white tracking-tight">
-                  {currentUser ? 'Akun & Sinkronisasi Supabase' : 'Masuk / Daftar Supabase'}
+                  {currentUser ? 'Akun & Sinkronisasi Cloud' : 'Masuk / Daftar Akun Cloud'}
                 </h3>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/30 text-teal-300">
                   PostgreSQL
@@ -398,7 +398,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            aria-label="Tutup modal autentikasi Supabase"
+            aria-label="Tutup modal autentikasi cloud"
             className="text-white/40 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -547,7 +547,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 </>
               ) : (
                 <>
-                  <span>Masuk ke Akun Supabase</span>
+                  <span>Masuk ke Akun Cloud</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -624,7 +624,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             <div className="p-3 rounded-2xl bg-teal-500/10 border border-teal-500/25 flex items-center gap-3">
               <ShieldCheck className="w-5 h-5 text-teal-400 shrink-0" />
               <div className="text-[11px] text-white/70">
-                Data lokal Anda yang ada saat ini akan langsung dimigrasi & diunggah secara aman ke database Supabase Anda.
+                Data lokal Anda yang ada saat ini akan langsung dimigrasi & diunggah secara aman ke database cloud Anda.
               </div>
             </div>
 
@@ -733,7 +733,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 </span>
                 <div>
                   <span className="text-xs font-bold text-emerald-300 block">
-                    Supabase Realtime Channel Aktif
+                    Cloud Realtime Channel Aktif
                   </span>
                   <span className="text-[11px] text-white/60">
                     Status: {realtimeStatus === 'SUBSCRIBED' ? 'Terhubung (Sinkron Instan HP ↔ Laptop)' : realtimeStatus}
@@ -805,27 +805,27 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 )}
               </div>
               <p className="text-[11px] text-white/50">
-                Nilai diambil dari <code className="text-teal-300">VITE_SUPABASE_URL</code> & <code className="text-teal-300">VITE_SUPABASE_ANON_KEY</code> atau dapat Anda isi langsung di bawah ini.
+                Konfigurasi server diambil dari pengaturan environment bawaan atau dapat Anda isi langsung di bawah ini.
               </p>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-white/80 mb-1.5">
-                Supabase Project URL
+                URL Server Cloud
               </label>
               <input
                 type="text"
                 required
                 value={configUrl}
                 onChange={(e) => setConfigUrl(e.target.value)}
-                placeholder="https://abcdefghijklmn.supabase.co"
+                placeholder="https://proyek-anda.cloud"
                 className="w-full text-xs font-mono px-3.5 py-2.5 bg-white/5 border border-white/15 rounded-xl text-white placeholder-white/30 focus:border-teal-400 focus:bg-white/10 outline-hidden transition-all"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-white/80 mb-1.5">
-                Supabase Anon / Public API Key
+                Public API Key
               </label>
               <textarea
                 rows={2}
@@ -863,7 +863,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                     clearCustomSupabaseConfig();
                     setConfigUrl('');
                     setConfigAnonKey('');
-                    showToast('Pengaturan Supabase kustom dihapus.');
+                    showToast('Pengaturan koneksi kustom dihapus.');
                   }}
                   className="px-3 py-2 text-xs font-semibold text-rose-300 hover:text-rose-200 bg-rose-500/10 rounded-xl cursor-pointer transition-colors"
                 >
@@ -875,7 +875,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 type="submit"
                 className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-teal-500 to-sky-500 hover:from-teal-600 hover:to-sky-600 text-white font-bold text-xs shadow-md cursor-pointer transition-all"
               >
-                Simpan Konfigurasi Supabase
+                Simpan Konfigurasi Cloud
               </button>
             </div>
           </form>
@@ -907,7 +907,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                       )}
                       <span className="font-bold text-sm">
                         {allReady
-                          ? 'Semua Tabel Supabase Siap & Aktif!'
+                          ? 'Semua Tabel Cloud Siap & Aktif!'
                           : `Status Skema Database (${readyCount}/${totalCount} Tabel Terdaftar)`}
                       </span>
                     </div>
@@ -924,8 +924,8 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                   </div>
                   <p className="text-xs opacity-85 leading-relaxed">
                     {allReady
-                      ? 'Tabel journals, user_profiles, agendas, wallets, targets, dan habits sudah terdaftar di Supabase PostgreSQL. Data Anda otomatis tersimpan di cloud.'
-                      : 'Tabel database Supabase belum terdaftar di proyek Anda. Jalankan skrip pendaftaran tabel di bawah ini agar catatan jurnal dan data lainnya dapat disimpan secara permanen di Supabase.'}
+                      ? 'Tabel journals, user_profiles, agendas, wallets, targets, dan habits sudah terdaftar di database PostgreSQL. Data Anda otomatis tersimpan di cloud.'
+                      : 'Tabel database cloud belum terdaftar di proyek Anda. Jalankan skrip pendaftaran tabel di bawah ini agar catatan jurnal dan data lainnya dapat disimpan secara permanen di cloud.'}
                   </p>
                 </div>
               );
@@ -934,7 +934,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
             {/* Live Table Badges */}
             <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10">
               <span className="text-xs font-bold text-white/90 block mb-2.5">
-                Daftar Tabel Database Supabase:
+                Daftar Tabel Database Cloud:
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
@@ -988,12 +988,12 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
               </div>
             </div>
 
-            {/* Metode 1: 1-Klik Supabase Dashboard (Paling Mudah) */}
+            {/* Metode 1: 1-Klik Dashboard SQL Editor */}
             <div className="p-4 rounded-2xl bg-gradient-to-br from-teal-500/10 via-sky-500/10 to-transparent border border-teal-500/30 space-y-3">
               <div className="flex items-center gap-2 text-teal-300">
                 <Sparkles className="w-4 h-4" />
                 <span className="text-xs font-bold uppercase tracking-wider">
-                  Cara Termudah (1 Klik di Dashboard Supabase)
+                  Cara Termudah (1 Klik di SQL Editor)
                 </span>
               </div>
 
@@ -1002,10 +1002,10 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                   Klik tombol <strong>"Salin Skrip SQL"</strong> di bawah.
                 </li>
                 <li>
-                  Klik tombol <strong>"Buka SQL Editor Supabase"</strong>.
+                  Klik tombol <strong>"Buka SQL Editor Cloud"</strong>.
                 </li>
                 <li>
-                  Tempelkan (Paste) skrip di editor Supabase, lalu klik tombol hijau <strong>"Run"</strong>. Selesai!
+                  Tempelkan (Paste) skrip di editor, lalu klik tombol hijau <strong>"Run"</strong>. Selesai!
                 </li>
               </ol>
 
@@ -1026,7 +1026,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                   className="py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs border border-white/20 transition-all flex items-center justify-center gap-1.5"
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Buka Supabase SQL Editor</span>
+                  <span>Buka SQL Editor Cloud</span>
                 </a>
 
                 <button
@@ -1052,7 +1052,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                 </div>
               </div>
               <p className="text-[11px] text-white/60 leading-relaxed">
-                Masukkan password database PostgreSQL Supabase Anda (password yang dibuat saat membuat project) untuk mengeksekusi migrasi langsung.
+                Masukkan password database PostgreSQL Anda (password yang dibuat saat membuat project) untuk mengeksekusi migrasi langsung.
               </p>
 
               <div className="flex gap-2">
@@ -1062,7 +1062,7 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
                     type="password"
                     value={dbPassword}
                     onChange={(e) => setDbPassword(e.target.value)}
-                    placeholder="Password database Supabase..."
+                    placeholder="Password database cloud..."
                     className="w-full text-xs px-3.5 pl-8 py-2 bg-white/5 border border-white/15 rounded-xl text-white placeholder-white/30 focus:border-emerald-400 focus:bg-white/10 outline-hidden transition-all"
                   />
                 </div>

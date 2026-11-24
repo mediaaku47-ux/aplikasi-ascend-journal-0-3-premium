@@ -119,6 +119,33 @@ CREATE TABLE IF NOT EXISTS public.announcements (
     expires_at TIMESTAMPTZ
 );
 
+-- 8B. TABEL KALENDER JADWAL ACARA (calendar_events)
+CREATE TABLE IF NOT EXISTS public.calendar_events (
+    id TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    event_date TEXT NOT NULL,
+    event_time TEXT,
+    category TEXT NOT NULL DEFAULT 'pribadi',
+    completed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8C. TABEL PENILAIAN & SARAN PENGGUNA (user_feedbacks)
+CREATE TABLE IF NOT EXISTS public.user_feedbacks (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT,
+    full_name TEXT,
+    avatar_url TEXT,
+    rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    suggestions TEXT DEFAULT '',
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    submitted_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 9. INDEX QUERY PERFORMA TINGGI
 CREATE INDEX IF NOT EXISTS idx_journals_user_id ON public.journals(user_id);
 CREATE INDEX IF NOT EXISTS idx_agendas_user_id ON public.agendas(user_id);
@@ -126,6 +153,8 @@ CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON public.wallets(user_id);
 CREATE INDEX IF NOT EXISTS idx_targets_user_id ON public.targets(user_id);
 CREATE INDEX IF NOT EXISTS idx_habits_user_id ON public.habits(user_id);
 CREATE INDEX IF NOT EXISTS idx_announcements_active ON public.announcements(is_active, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_date ON public.calendar_events(user_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_user_feedbacks_updated_at ON public.user_feedbacks(updated_at DESC);
 
 -- 10. KEAMANAN AKSES TINGKAT BARIS (ROW LEVEL SECURITY)
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
@@ -135,6 +164,8 @@ ALTER TABLE public.wallets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.targets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.habits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_feedbacks ENABLE ROW LEVEL SECURITY;
 
 -- 10. KEBIJAKAN AKSES PRIVAT (RLS POLICIES)
 DROP POLICY IF EXISTS "Users can view own profile" ON public.user_profiles;
@@ -241,6 +272,37 @@ DROP POLICY IF EXISTS "Admins can delete announcements" ON public.announcements;
 CREATE POLICY "Admins can delete announcements" ON public.announcements FOR DELETE 
 USING (auth.role() = 'authenticated');
 
+-- Kebijakan Akses Kalender Jadwal Acara (calendar_events) - Strict user_id RLS
+DROP POLICY IF EXISTS "Users can view own calendar events" ON public.calendar_events;
+CREATE POLICY "Users can view own calendar events" ON public.calendar_events FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own calendar events" ON public.calendar_events;
+CREATE POLICY "Users can insert own calendar events" ON public.calendar_events FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own calendar events" ON public.calendar_events;
+CREATE POLICY "Users can update own calendar events" ON public.calendar_events FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete own calendar events" ON public.calendar_events;
+CREATE POLICY "Users can delete own calendar events" ON public.calendar_events FOR DELETE USING (auth.uid() = user_id);
+
+-- Kebijakan Akses Penilaian & Saran Pengguna (user_feedbacks)
+DROP POLICY IF EXISTS "Users and admin can view feedbacks" ON public.user_feedbacks;
+CREATE POLICY "Users and admin can view feedbacks" ON public.user_feedbacks FOR SELECT
+USING (
+  auth.uid() = user_id
+  OR (auth.jwt() ->> 'email' = 'kamalizudin36@gmail.com')
+  OR (auth.jwt() ->> 'email' LIKE 'admin@%')
+);
+
+DROP POLICY IF EXISTS "Users can insert own feedback" ON public.user_feedbacks;
+CREATE POLICY "Users can insert own feedback" ON public.user_feedbacks FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own feedback" ON public.user_feedbacks;
+CREATE POLICY "Users can update own feedback" ON public.user_feedbacks FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete own feedback" ON public.user_feedbacks;
+CREATE POLICY "Users can delete own feedback" ON public.user_feedbacks FOR DELETE USING (auth.uid() = user_id);
+
 -- 11. SUPABASE REALTIME REPLICATION (SINKRONISASI REALTIME HP <-> LAPTOP)
 DO $$
 BEGIN
@@ -248,7 +310,7 @@ BEGIN
     CREATE PUBLICATION supabase_realtime;
   END IF;
   BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.user_profiles, public.journals, public.agendas, public.wallets, public.targets, public.habits, public.announcements;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.user_profiles, public.journals, public.agendas, public.wallets, public.targets, public.habits, public.announcements, public.calendar_events, public.user_feedbacks;
   EXCEPTION
     WHEN duplicate_object THEN NULL;
     WHEN others THEN NULL;

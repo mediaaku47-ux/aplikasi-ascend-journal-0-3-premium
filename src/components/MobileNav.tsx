@@ -60,6 +60,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
       case 'finance': return 'Keuangan & Tabungan';
       case 'progress': return 'Analytics & XP';
       case 'agenda': return 'Agenda Harian';
+      case 'calendar': return 'Kalender Acara';
       case 'habits': return 'Pelacak Kebiasaan';
       case 'targets': return 'Target & Gol';
       case 'notes': return 'Catatan & Memo';
@@ -382,7 +383,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             const isActive = currentActiveId === item.id;
             const Icon = item.icon;
 
-            // Tombol Tambah (+) Melayang di Tengah
+            // Tombol Tambah (+) Melayang di Tengah (Model Squircle Berlapis Glossy)
             if (item.id === 'add') {
               return (
                 <button
@@ -392,21 +393,44 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                   aria-label={isAddMenuOpen ? 'Tutup Pilihan Tambah' : item.label}
                   className="relative flex-1 h-full flex flex-col items-center justify-center cursor-pointer focus:outline-none transition-all group overflow-visible z-50"
                 >
-                  <motion.div 
+                  <motion.div
                     animate={{
-                      rotate: isAddMenuOpen ? 135 : 0,
-                      scale: isAddMenuOpen ? 1.05 : 1,
+                      scale: isAddMenuOpen ? 0.94 : 1,
+                      y: isAddMenuOpen ? 1 : 0,
                     }}
-                    transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                    className={`w-13 h-13 -mt-6 rounded-full bg-[#2DD4BF] text-[#0B0E14] flex items-center justify-center shadow-[0_0_24px_rgba(45,212,191,0.7)] ${
-                      isLight ? 'border-4 border-[#032D22]' : 'border-4 border-[#0B0E14]'
-                    } cursor-pointer active:scale-95 transition-transform`}
+                    whileHover={{ scale: 1.05, y: -1 }}
+                    whileTap={{ scale: 0.92 }}
+                    transition={{ type: 'spring', damping: 20, stiffness: 320 }}
+                    style={{
+                      background: isAddMenuOpen
+                        ? 'linear-gradient(145deg, #115E59 0%, #073228 100%)'
+                        : 'linear-gradient(145deg, #5EEAD4 0%, #26A69A 45%, #0D6E5D 100%)',
+                      boxShadow: isAddMenuOpen
+                        ? '0 4px 14px rgba(7, 50, 40, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25)'
+                        : '0 8px 20px -4px rgba(38, 166, 154, 0.55), 0 3px 8px rgba(0, 0, 0, 0.28), inset 0 1.5px 0 rgba(255, 255, 255, 0.55)',
+                    }}
+                    className={`relative w-[52px] h-[52px] -mt-6 rounded-full flex items-center justify-center overflow-hidden border border-white/40 ring-4 ${
+                      isLight ? 'ring-[#032D22]' : 'ring-[#0B0E14]'
+                    } cursor-pointer`}
                   >
-                    <Plus 
-                      className="w-6 h-6 text-[#0B0E14] stroke-[3]" 
+                    {/* Kilau Kaca Halus di Bagian Atas */}
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full"
+                      style={{
+                        background:
+                          'linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.04) 100%)',
+                      }}
                     />
+                    <motion.div
+                      animate={{ rotate: isAddMenuOpen ? 45 : 0 }}
+                      transition={{ type: 'spring', damping: 18, stiffness: 320 }}
+                      className="relative z-10 flex items-center justify-center"
+                    >
+                      <Plus className="w-6 h-6 text-white stroke-[2.75] drop-shadow-xs" />
+                    </motion.div>
                   </motion.div>
-                  <span 
+                  <span
                     className="text-[#2DD4BF] text-[10.5px] tracking-tight text-center mt-1 font-semibold transition-colors"
                     style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600 }}
                   >

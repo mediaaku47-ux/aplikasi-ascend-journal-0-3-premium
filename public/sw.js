@@ -1,13 +1,16 @@
 // Ascend Journal Service Worker for Progressive Web App (PWA)
-const CACHE_NAME = 'ascend-journal-pwa-v27';
+const CACHE_NAME = 'ascend-journal-pwa-v28';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/logo.png',
+  '/favicon.svg',
   '/pwa-192x192.png',
   '/pwa-512x512.png',
+  '/pwa-maskable-192x192.png',
+  '/pwa-maskable-512x512.png',
   '/apple-touch-icon.png',
-  '/favicon-32x32.png'
+  '/favicon-32x32.png',
+  '/favicon-16x16.png'
 ];
 
 self.addEventListener('install', (event) => {

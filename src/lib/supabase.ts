@@ -193,14 +193,14 @@ export const saveCustomSupabaseConfig = (url: string, anonKey: string): boolean 
     const cleanKey = anonKey.trim();
 
     if (!isValidSupabaseUrl(cleanUrl)) {
-      lastConfigError = 'Supabase URL harus berupa URL valid (contoh: https://xyz.supabase.co)';
+      lastConfigError = 'Alamat URL server cloud harus berupa URL yang valid.';
       return false;
     }
     if (!isValidSupabaseKey(cleanKey)) {
       if (cleanKey.includes('...') || cleanKey.includes('…') || cleanKey.endsWith('..')) {
-        lastConfigError = 'Anon Key yang Anda masukkan terpotong (...). Harap salin seluruh string Anon Key dari Supabase Dashboard tanpa tanda titik tiga.';
+        lastConfigError = 'Kunci API yang Anda masukkan terpotong (...). Harap salin seluruh kunci API secara lengkap.';
       } else {
-        lastConfigError = 'Supabase Anon Key tidak valid. Pastikan format JWT lengkap (3 bagian dipisahkan titik) dari Supabase Dashboard.';
+        lastConfigError = 'Kunci API tidak valid. Pastikan format kunci lengkap sudah benar.';
       }
       return false;
     }
@@ -219,7 +219,7 @@ export const saveCustomSupabaseConfig = (url: string, anonKey: string): boolean 
     cachedKey = '';
     return true;
   } catch (err: any) {
-    lastConfigError = err?.message || 'Gagal menyimpan konfigurasi Supabase.';
+    lastConfigError = err?.message || 'Gagal menyimpan konfigurasi server cloud.';
     console.error('Failed to save custom supabase config:', err);
     return false;
   }

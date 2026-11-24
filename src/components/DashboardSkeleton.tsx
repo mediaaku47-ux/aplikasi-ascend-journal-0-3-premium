@@ -1,4 +1,5 @@
 import React from 'react';
+import { AscendBrand } from './AscendBrand';
 
 interface DashboardSkeletonProps {
   theme?: 'dark' | 'light';
@@ -46,14 +47,8 @@ export const DashboardSkeleton: React.FC<DashboardSkeletonProps> = ({
               : 'bg-[#090D16] border-[#263449]'
           }`}
         >
-          {/* Logo & Brand */}
-          <div className="flex items-center gap-2.5">
-            <ShimmerBox tone="emerald" className="w-8 h-8 rounded-lg shrink-0" />
-            <div className="space-y-1">
-              <ShimmerBox tone="emerald" className="h-3.5 w-24" />
-              <ShimmerBox tone="emerald" className="h-2.5 w-14 opacity-75" />
-            </div>
-          </div>
+          {/* Logo & Brand (Inline SVG konsisten saat memuat) */}
+          <AscendBrand size="md" theme="dark" showDot={false} />
 
           {/* Rolling Profile Badge Skeleton */}
           <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-white/5 border border-white/10">

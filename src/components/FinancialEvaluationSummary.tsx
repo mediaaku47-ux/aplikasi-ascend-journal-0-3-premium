@@ -565,7 +565,7 @@ export const FinancialEvaluationSummary: React.FC<FinancialEvaluationSummaryProp
               <button
                 type="button"
                 onClick={onOpenCloseMonthModal}
-                title="Tutup & Arsipkan Bulan Ini ke Supabase"
+                title="Tutup & Arsipkan Bulan Ini ke Cloud"
                 className={`p-2 rounded-xl border flex items-center gap-1 text-xs font-bold transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                   isLight
                     ? 'bg-emerald-50 border-emerald-300 text-emerald-900 hover:bg-emerald-100'

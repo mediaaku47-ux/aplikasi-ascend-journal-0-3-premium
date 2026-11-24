@@ -199,6 +199,78 @@ export const PageTransitionSkeleton: React.FC<PageTransitionSkeletonProps> = ({
   }
 
   /* ========================================================================= */
+  /* 2B. KALENDER JADWAL ACARA (EventCalendarView)                             */
+  /* ========================================================================= */
+  if (tab === 'calendar') {
+    return (
+      <div className="space-y-5 pb-28 md:pb-12 max-w-6xl mx-auto" aria-busy="true" aria-label="Memuat Kalender Acara">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2.5">
+              <ShimmerBlock isLight={isLight} className="w-9 h-9 rounded-xl shrink-0" />
+              <ShimmerBlock isLight={isLight} className="h-7 w-56 sm:w-64" />
+            </div>
+            <ShimmerBlock isLight={isLight} className="h-4 w-72 opacity-80" />
+          </div>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <ShimmerBlock isLight={isLight} className="h-11 w-28 rounded-xl" />
+            <ShimmerBlock isLight={isLight} className="h-11 w-36 rounded-xl" />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {[0, 1, 2, 3, 4, 5].map((chip) => (
+            <ShimmerBlock key={chip} isLight={isLight} className="h-9 w-24 rounded-xl" />
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-6 space-y-3">
+            <SkeletonCard isLight={isLight} className="rounded-xl p-4 sm:p-6 space-y-4">
+              <div className={`flex items-center justify-between pb-4 border-b ${isLight ? 'border-slate-300/90' : 'border-white/10'}`}>
+                <ShimmerBlock isLight={isLight} className="w-10 h-10 rounded-lg" />
+                <div className="flex flex-col items-center gap-1.5">
+                  <ShimmerBlock isLight={isLight} className="h-5 w-28" />
+                  <ShimmerBlock isLight={isLight} className="h-3.5 w-14 opacity-75" />
+                </div>
+                <ShimmerBlock isLight={isLight} className="w-10 h-10 rounded-lg" />
+              </div>
+              <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                {Array.from({ length: 35 }).map((_, idx) => (
+                  <ShimmerBlock key={idx} isLight={isLight} className="w-full h-[48px] sm:h-[58px] rounded-lg" />
+                ))}
+              </div>
+            </SkeletonCard>
+            <ShimmerBlock isLight={isLight} className="w-full h-12 rounded-xl" />
+          </div>
+
+          <SkeletonCard isLight={isLight} className="lg:col-span-6 rounded-xl p-4 sm:p-6 space-y-4">
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-300/90' : 'border-white/10'}`}>
+              <div className="space-y-1.5">
+                <ShimmerBlock isLight={isLight} className="h-5 w-36" />
+                <ShimmerBlock isLight={isLight} className="h-3.5 w-28 opacity-75" />
+              </div>
+              <ShimmerBlock isLight={isLight} className="h-9 w-36 rounded-lg shrink-0" />
+            </div>
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex items-start gap-3">
+                <div className="w-6 flex flex-col items-center pt-1 shrink-0">
+                  <ShimmerBlock isLight={isLight} className={row === 0 ? 'w-5 h-5 rounded-full' : 'w-3 h-3 rounded-full'} />
+                  {row < 2 && <ShimmerBlock isLight={isLight} className="w-0.5 h-16 mt-1" />}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <ShimmerBlock isLight={isLight} className="h-4 w-44" />
+                  <ShimmerBlock isLight={isLight} className="h-14 w-full rounded-lg" />
+                </div>
+              </div>
+            ))}
+          </SkeletonCard>
+        </div>
+      </div>
+    );
+  }
+
+  /* ========================================================================= */
   /* 3. PELACAK KEBIASAAN (HabitsView + HabitTrackerCard)                      */
   /* ========================================================================= */
   if (tab === 'habits') {

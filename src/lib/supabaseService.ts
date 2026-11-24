@@ -1,6 +1,17 @@
 import { getSupabase, isSupabaseConfigured } from './supabase';
 export { isSupabaseConfigured };
-import { Task, Habit, Transaction, QuickNote, UserProfile, TargetItem, AppAnnouncement } from '../types';
+import {
+  Task,
+  Habit,
+  Transaction,
+  QuickNote,
+  UserProfile,
+  TargetItem,
+  AppAnnouncement,
+  AppFeedback,
+  CalendarEvent,
+  CalendarEventCategory,
+} from '../types';
 import { User, RealtimeChannel } from '@supabase/supabase-js';
 import { uploadUserAvatar, getAvatarSignedUrl, removeUserAvatar } from './avatarService';
 
@@ -118,22 +129,41 @@ export const authService = {
   },
 
   // Perbarui kata sandi pengguna yang sedang login (auth.updateUser)
-  async updatePassword(newPassword: string) {
+  async updatePassword(newPassword: string, currentPassword?: string) {
     if (!isSupabaseConfigured()) {
       const err: any = new Error(
-        'Proyek Supabase belum terhubung. Silakan hubungkan Supabase terlebih dahulu.'
+        'Layanan cloud belum terhubung. Silakan hubungkan penyimpanan cloud terlebih dahulu.'
       );
       err.code = 'SUPABASE_NOT_CONFIGURED';
       throw err;
     }
 
     const client = getSupabase();
+
+    if (typeof currentPassword === 'string') {
+      const { data: userData, error: userError } = await client.auth.getUser();
+      const userEmail = userData?.user?.email;
+
+      if (userError || !userEmail) {
+        throw new Error('Sesi akun tidak ditemukan. Silakan masuk ulang terlebih dahulu.');
+      }
+
+      const { error: verifyError } = await client.auth.signInWithPassword({
+        email: userEmail,
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        throw new Error('Kata sandi lama tidak sesuai. Silakan periksa kembali.');
+      }
+    }
+
     const { data, error } = await client.auth.updateUser({
       password: newPassword,
     });
 
     if (error) {
-      console.error('Supabase updatePassword error:', error);
+      console.error('Cloud updatePassword error:', error);
       throw error;
     }
 
@@ -206,7 +236,7 @@ export function getReadableAuthError(error: any): string {
   const msg = error.message || error.error_description || String(error);
 
   if (msg.includes('SUPABASE_NOT_CONFIGURED') || error.code === 'SUPABASE_NOT_CONFIGURED') {
-    return 'Proyek Supabase belum terhubung! Silakan klik tombol konfigurasi Supabase untuk memasukkan Project URL & Anon Key dari dashboard Supabase Anda.';
+    return 'Koneksi server cloud belum terhubung! Silakan periksa pengaturan sinkronisasi cloud terlebih dahulu.';
   }
 
   // Google OAuth specific provider errors
@@ -222,7 +252,7 @@ export function getReadableAuthError(error: any): string {
     msg.includes('invalid_client') ||
     msg.includes('unauthorized_client')
   ) {
-    return 'Google Sign-In belum dikonfigurasi di Supabase Dashboard. Silakan masuk menggunakan Email & Password, atau aktifkan Google Provider di Supabase Dashboard (Authentication > Providers).';
+    return 'Masuk dengan Google belum diaktifkan pada server autentikasi. Silakan masuk menggunakan Email & Kata Sandi.';
   }
 
   if (
@@ -230,23 +260,23 @@ export function getReadableAuthError(error: any): string {
     msg.includes('Invalid path') ||
     msg.includes('PGRST126')
   ) {
-    return 'URL Proyek Supabase tidak valid atau mengandung path tambahan (seperti /rest/v1). Harap gunakan Project URL murni (contoh: https://xyz.supabase.co). Silakan periksa kembali konfigurasi Supabase Anda.';
+    return 'URL server cloud tidak valid atau mengandung path tambahan. Harap gunakan alamat URL utama yang benar.';
   }
 
   if (msg.includes('Invalid login credentials') || msg.includes('invalid_grant')) {
     return 'Email atau kata sandi tidak cocok. Silakan periksa kembali.';
   }
   if (msg.includes('User already registered') || msg.includes('already registered') || msg.includes('User already exists')) {
-    return 'Email ini sudah terdaftar di Supabase Auth. Silakan pilih tab "Masuk".';
+    return 'Email ini sudah terdaftar. Silakan pilih tab "Masuk".';
   }
   if (msg.includes('Password should be at least') || msg.includes('password is too short')) {
-    return 'Kata sandi minimal harus 6 karakter sesuai ketentuan Supabase.';
+    return 'Kata sandi minimal harus 6 karakter.';
   }
   if (msg.includes('Signup requires a valid password')) {
     return 'Pendaftaran memerlukan kata sandi yang valid.';
   }
   if (msg.includes('Email not confirmed')) {
-    return 'Email belum dikonfirmasi. Harap periksa email Anda, atau matikan opsi "Confirm email" pada Authentication → Providers → Email di panel Supabase untuk login instan.';
+    return 'Email belum dikonfirmasi. Harap periksa kotak masuk email Anda untuk menyelesaikan verifikasi.';
   }
   if (msg.includes('rate limit') || msg.includes('Too many requests') || msg.includes('over_email_send_rate_limit')) {
     return 'Terlalu banyak permintaan. Harap tunggu beberapa saat lalu coba kembali.';
@@ -255,7 +285,7 @@ export function getReadableAuthError(error: any): string {
     return 'Format alamat email tidak valid (contoh: nama@domain.com).';
   }
   if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('FetchError')) {
-    return 'Gagal menghubungi server Supabase. Pastikan Project URL dan Public/Anon Key yang Anda masukkan benar serta koneksi internet stabil.';
+    return 'Gagal menghubungi server cloud. Pastikan koneksi internet Anda stabil dan konfigurasi server sudah benar.';
   }
   const lower = msg.toLowerCase();
   if (
@@ -265,7 +295,7 @@ export function getReadableAuthError(error: any): string {
     lower.includes('apikey') ||
     lower.includes('jwt')
   ) {
-    return 'Public Anon Key Supabase tidak valid atau terpotong (...). Silakan periksa dan masukkan Anon Key (public) lengkap dari Supabase Dashboard → Project Settings → API.';
+    return 'Kunci akses server cloud tidak valid atau terpotong. Silakan periksa kembali pengaturan koneksi cloud.';
   }
   return msg;
 }
@@ -281,6 +311,8 @@ export interface CloudFullData {
   transactions?: Transaction[];
   quickNotes?: QuickNote[];
   targets?: TargetItem[];
+  calendarEvents?: CalendarEvent[];
+  calendarEventsTableMissing?: boolean;
   totalBalance?: number;
   savingsBalance?: number;
 }
@@ -305,7 +337,7 @@ async function verifyActiveSupabaseSession(
       ok: false,
       error: {
         code: 'SUPABASE_NOT_CONFIGURED',
-        message: 'Konfigurasi proyek Supabase belum terhubung.',
+        message: 'Konfigurasi server cloud belum terhubung.',
       },
     };
   }
@@ -370,7 +402,7 @@ async function verifyActiveSupabaseSession(
             ok: false,
             error: {
               code: 'AUTO_SESSION_FAILED',
-              message: signUpRes.error.message || 'Gagal menghubungkan sesi otomatis ke Supabase.',
+              message: signUpRes.error.message || 'Gagal menghubungkan sesi otomatis ke cloud.',
             },
           };
         }
@@ -382,7 +414,7 @@ async function verifyActiveSupabaseSession(
         ok: false,
         error: {
           code: 'SESSION_EXPIRED',
-          message: 'Sesi Supabase belum aktif. Silakan coba lagi.',
+          message: 'Sesi akun belum aktif. Silakan coba lagi.',
         },
       };
     }
@@ -392,7 +424,7 @@ async function verifyActiveSupabaseSession(
         ok: false,
         error: {
           code: 'USER_MISMATCH',
-          message: 'Akun aktif tidak cocok dengan sesi Supabase.',
+          message: 'Akun aktif tidak cocok dengan sesi saat ini.',
         },
       };
     }
@@ -408,7 +440,7 @@ async function verifyActiveSupabaseSession(
       ok: false,
       error: {
         code: 'SESSION_ERROR',
-        message: err?.message || 'Gagal memverifikasi sesi Supabase.',
+        message: err?.message || 'Gagal memverifikasi sesi akun.',
       },
     };
   }
@@ -432,6 +464,7 @@ export const dbService = {
         habitsRes,
         targetsRes,
         walletsRes,
+        calendarEventsRes,
       ] = await Promise.all([
         client.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
         client.from('journals').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -439,6 +472,12 @@ export const dbService = {
         client.from('habits').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
         client.from('targets').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
         client.from('wallets').select('*').eq('user_id', userId).maybeSingle(),
+        client
+          .from('calendar_events')
+          .select('*')
+          .eq('user_id', userId)
+          .order('event_date', { ascending: true })
+          .order('event_time', { ascending: true }),
       ]);
 
       const result: CloudFullData = {};
@@ -446,8 +485,15 @@ export const dbService = {
       // Profile
       if (profileRes.data) {
         const p = profileRes.data;
+        let parsedFeedback: AppFeedback | undefined;
+        if (p.feedback) {
+          try {
+            parsedFeedback = typeof p.feedback === 'string' ? JSON.parse(p.feedback) : p.feedback;
+          } catch {}
+        }
         result.userProfile = {
           name: p.full_name || 'Pengguna',
+          email: p.email || check.sessionUser?.email || undefined,
           avatarUrl: p.avatar_url || undefined,
           greetingTitle: p.greeting_title || `Selamat Datang, ${p.full_name || 'Pengguna'}`,
           greetingSubtitle: p.greeting_subtitle || 'Ayo lebih produktif lagi.',
@@ -458,8 +504,33 @@ export const dbService = {
           year: new Date().getFullYear(),
           totalDaysInMonth: 31,
           firstAppOpenAt: p.first_app_open_at || undefined,
-          feedback: p.feedback ? (typeof p.feedback === 'string' ? JSON.parse(p.feedback) : p.feedback) : undefined,
+          feedback: parsedFeedback,
         };
+      }
+
+      // Calendar Events (graceful if table not created on Supabase yet)
+      if (calendarEventsRes.error) {
+        const msg = calendarEventsRes.error.message || '';
+        const code = calendarEventsRes.error.code || '';
+        if (code === 'PGRST205' || code === '42P01' || msg.includes('calendar_events')) {
+          result.calendarEventsTableMissing = true;
+        } else {
+          console.warn('Notice fetch calendar_events from Supabase:', msg);
+        }
+      } else if (calendarEventsRes.data) {
+        result.calendarEventsTableMissing = false;
+        result.calendarEvents = calendarEventsRes.data.map((ev: any): CalendarEvent => ({
+          id: ev.id,
+          userId: ev.user_id,
+          title: ev.title,
+          description: ev.description || '',
+          date: ev.event_date,
+          time: ev.event_time || undefined,
+          category: (ev.category || 'pribadi') as CalendarEventCategory,
+          completed: Boolean(ev.completed),
+          createdAt: ev.created_at || new Date().toISOString(),
+          updatedAt: ev.updated_at || undefined,
+        }));
       }
 
       // Journals -> quickNotes
@@ -920,10 +991,18 @@ export const dbService = {
     return res;
   },
 
-  async syncProfile(userId: string, profile: UserProfile) {
-    const client = getSupabase();
+  async syncProfile(userId: string | undefined, profile: UserProfile) {
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { data: null, error: check.error, sessionUser: null as User | null };
+    }
+    const client = check.client;
+    const activeUserId = check.userId;
+    const resolvedEmail = profile.email || check.sessionUser?.email || null;
+
     const payload: any = {
-      id: userId,
+      id: activeUserId,
+      email: resolvedEmail,
       full_name: profile.name,
       avatar_url: profile.avatarUrl || null,
       greeting_title: profile.greetingTitle,
@@ -941,24 +1020,295 @@ export const dbService = {
       payload.feedback = profile.feedback;
     }
 
-    const res = await client.from('user_profiles').upsert(payload);
+    const res = await client.from('user_profiles').upsert(payload, { onConflict: 'id' });
 
-    // Fallback gracefully jika kolom 'feedback' atau 'first_app_open_at' belum ditambahkan di database Supabase lama pengguna
-    if (res.error && (
-      res.error.message?.includes('feedback') || 
-      res.error.message?.includes('first_app_open_at') ||
-      res.error.details?.includes('feedback') ||
-      res.error.details?.includes('first_app_open_at')
-    )) {
-      delete payload.feedback;
+    // Jika hanya kolom first_app_open_at yang belum ada, simpan ulang tanpa first_app_open_at,
+    // namun JANGAN pernah menghapus payload.feedback secara diam-diam.
+    if (
+      res.error &&
+      !res.error.message?.includes('feedback') &&
+      !res.error.details?.includes('feedback') &&
+      (res.error.message?.includes('first_app_open_at') ||
+        res.error.details?.includes('first_app_open_at'))
+    ) {
       delete payload.first_app_open_at;
-      return client.from('user_profiles').upsert(payload);
+      const retryRes = await client.from('user_profiles').upsert(payload, { onConflict: 'id' });
+      return { ...retryRes, sessionUser: check.sessionUser };
     }
 
-    return res;
+    return { ...res, sessionUser: check.sessionUser };
   },
 
-  // Mengambil seluruh ulasan & penilaian bintang dari tabel user_profiles untuk akun Admin
+  async submitUserFeedback(
+    userId: string | undefined,
+    profile: UserProfile,
+    feedback: AppFeedback
+  ): Promise<{ ok: boolean; error?: string; sessionUser?: User | null }> {
+    if (!isSupabaseConfigured()) {
+      return { ok: false, error: 'Konfigurasi server cloud belum terhubung.' };
+    }
+
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { ok: false, error: check.error.message };
+    }
+
+    const client = check.client;
+    const activeUserId = check.userId;
+    const resolvedEmail = profile.email || check.sessionUser?.email || null;
+    const nowIso = new Date().toISOString();
+
+    const [profileRes, dedicatedRes] = await Promise.all([
+      client
+        .from('user_profiles')
+        .upsert(
+          {
+            id: activeUserId,
+            email: resolvedEmail,
+            full_name: profile.name || resolvedEmail?.split('@')[0] || 'Pengguna',
+            avatar_url: profile.avatarUrl || null,
+            greeting_title: profile.greetingTitle,
+            greeting_subtitle: profile.greetingSubtitle,
+            streak_days: profile.streakDays || 0,
+            last_streak_date: profile.lastStreakDate || null,
+            currency_symbol: profile.currencySymbol || 'Rp',
+            feedback,
+            updated_at: nowIso,
+          },
+          { onConflict: 'id' }
+        ),
+      client
+        .from('user_feedbacks')
+        .upsert(
+          {
+            user_id: activeUserId,
+            email: resolvedEmail,
+            full_name: profile.name || resolvedEmail?.split('@')[0] || 'Pengguna',
+            avatar_url: profile.avatarUrl || null,
+            rating: Math.min(5, Math.max(1, Math.round(Number(feedback.rating) || 5))),
+            suggestions: feedback.suggestions || '',
+            tags: Array.isArray(feedback.tags) ? feedback.tags : [],
+            submitted_at: feedback.submittedAt || nowIso,
+            updated_at: feedback.updatedAt || nowIso,
+          },
+          { onConflict: 'user_id' }
+        ),
+    ]);
+
+    const profileSaved = !profileRes.error;
+    const dedicatedSaved = !dedicatedRes.error;
+
+    if (!profileSaved && !dedicatedSaved) {
+      return {
+        ok: false,
+        error: profileRes.error?.message || dedicatedRes.error?.message || 'Gagal menyimpan penilaian ke Supabase.',
+        sessionUser: check.sessionUser,
+      };
+    }
+
+    return { ok: true, sessionUser: check.sessionUser };
+  },
+
+  async syncOnboardingPreferences(
+    userId: string,
+    profile: UserProfile
+  ): Promise<void> {
+    if (!isSupabaseConfigured() || !isValidSupabaseUserId(userId)) return;
+    const client = getSupabase();
+
+    try {
+      await Promise.allSettled([
+        this.syncProfile(userId, profile),
+        client.auth.updateUser({
+          data: {
+            full_name: profile.name,
+            name: profile.name,
+            primary_focus: profile.primaryFocus || 'all',
+            reminder_enabled: Boolean(profile.reminderEnabled),
+            notification_permission: profile.notificationPermission || 'default',
+            onboarding_completed: true,
+            onboarding_completed_at: profile.onboardingCompletedAt || new Date().toISOString(),
+          },
+        }),
+      ]);
+    } catch (err) {
+      console.warn('Notice syncing onboarding preferences:', err);
+    }
+  },
+
+  // Mengambil seluruh ulasan & penilaian bintang beserta status diagnostik RLS yang jujur
+  async fetchAllUserFeedbacksWithStatus(): Promise<{
+    feedbacks: Array<{
+      id: string;
+      email?: string;
+      fullName: string;
+      avatarUrl?: string;
+      rating: number;
+      suggestions: string;
+      tags?: string[];
+      submittedAt?: string;
+      updatedAt?: string;
+      firstAppOpenAt?: string;
+    }>;
+    errorMessage?: string;
+    rlsRestrictedLikely: boolean;
+    totalProfileRowsRead: number;
+    userFeedbacksTableExists: boolean;
+  }> {
+    if (!isSupabaseConfigured()) {
+      return {
+        feedbacks: [],
+        errorMessage: 'Konfigurasi Supabase belum aktif.',
+        rlsRestrictedLikely: false,
+        totalProfileRowsRead: 0,
+        userFeedbacksTableExists: false,
+      };
+    }
+
+    const client = getSupabase();
+    try {
+      const [profilesRes, dedicatedRes] = await Promise.all([
+        client.from('user_profiles').select('*'),
+        client.from('user_feedbacks').select('*'),
+      ]);
+
+      const errorParts: string[] = [];
+      if (profilesRes.error) {
+        errorParts.push(`user_profiles: ${profilesRes.error.message}`);
+      }
+
+      const dedicatedMissing =
+        Boolean(dedicatedRes.error) &&
+        (dedicatedRes.error?.code === 'PGRST205' ||
+          dedicatedRes.error?.code === '42P01' ||
+          dedicatedRes.error?.message?.includes('user_feedbacks'));
+
+      if (dedicatedRes.error && !dedicatedMissing) {
+        errorParts.push(`user_feedbacks: ${dedicatedRes.error.message}`);
+      }
+
+      const byUserId = new Map<
+        string,
+        {
+          id: string;
+          email?: string;
+          fullName: string;
+          avatarUrl?: string;
+          rating: number;
+          suggestions: string;
+          tags?: string[];
+          submittedAt?: string;
+          updatedAt?: string;
+          firstAppOpenAt?: string;
+        }
+      >();
+
+      const upsertRow = (item: {
+        id: string;
+        email?: string;
+        fullName: string;
+        avatarUrl?: string;
+        rating: number;
+        suggestions: string;
+        tags?: string[];
+        submittedAt?: string;
+        updatedAt?: string;
+        firstAppOpenAt?: string;
+      }) => {
+        const existing = byUserId.get(item.id);
+        if (!existing) {
+          byUserId.set(item.id, item);
+          return;
+        }
+        const existingTs = new Date(existing.updatedAt || existing.submittedAt || 0).getTime();
+        const nextTs = new Date(item.updatedAt || item.submittedAt || 0).getTime();
+        if (nextTs >= existingTs) {
+          byUserId.set(item.id, {
+            ...existing,
+            ...item,
+            email: item.email || existing.email,
+            avatarUrl: item.avatarUrl || existing.avatarUrl,
+            firstAppOpenAt: item.firstAppOpenAt || existing.firstAppOpenAt,
+          });
+        }
+      };
+
+      const totalProfileRowsRead = Array.isArray(profilesRes.data) ? profilesRes.data.length : 0;
+
+      if (Array.isArray(profilesRes.data)) {
+        profilesRes.data.forEach((row: any) => {
+          let parsedFb = row.feedback;
+          if (typeof parsedFb === 'string') {
+            try {
+              parsedFb = JSON.parse(parsedFb);
+            } catch {}
+          }
+
+          if (parsedFb && (parsedFb.rating || parsedFb.suggestions)) {
+            const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(parsedFb.rating) || 5)));
+            upsertRow({
+              id: row.id,
+              email: row.email || undefined,
+              fullName: row.full_name || 'Pengguna',
+              avatarUrl: row.avatar_url || undefined,
+              rating: normalizedRating,
+              suggestions: parsedFb.suggestions || '',
+              tags: Array.isArray(parsedFb.tags) ? parsedFb.tags : [],
+              submittedAt: parsedFb.submittedAt || row.updated_at || row.created_at,
+              updatedAt: parsedFb.updatedAt || row.updated_at,
+              firstAppOpenAt: row.first_app_open_at,
+            });
+          }
+        });
+      }
+
+      if (!dedicatedRes.error && Array.isArray(dedicatedRes.data)) {
+        dedicatedRes.data.forEach((row: any) => {
+          const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(row.rating) || 5)));
+          upsertRow({
+            id: row.user_id,
+            email: row.email || undefined,
+            fullName: row.full_name || 'Pengguna',
+            avatarUrl: row.avatar_url || undefined,
+            rating: normalizedRating,
+            suggestions: row.suggestions || '',
+            tags: Array.isArray(row.tags) ? row.tags : [],
+            submittedAt: row.submitted_at || row.updated_at,
+            updatedAt: row.updated_at || row.submitted_at,
+          });
+        });
+      }
+
+      const feedbacks = Array.from(byUserId.values()).sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.submittedAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.submittedAt || 0).getTime();
+        return timeB - timeA;
+      });
+
+      const userFeedbacksCount = Array.isArray(dedicatedRes.data) ? dedicatedRes.data.length : 0;
+      const rlsRestrictedLikely =
+        !profilesRes.error && totalProfileRowsRead <= 1 && userFeedbacksCount <= 1;
+
+      return {
+        feedbacks,
+        errorMessage: errorParts.length > 0 ? errorParts.join(' | ') : undefined,
+        rlsRestrictedLikely,
+        totalProfileRowsRead,
+        userFeedbacksTableExists: !dedicatedMissing && !dedicatedRes.error,
+      };
+    } catch (err: any) {
+      console.error('Error fetching feedbacks for admin:', err);
+      return {
+        feedbacks: [],
+        errorMessage: err?.message || 'Gagal menghubungi server Supabase.',
+        rlsRestrictedLikely: false,
+        totalProfileRowsRead: 0,
+        userFeedbacksTableExists: false,
+      };
+    }
+  },
+
+  // Mengambil seluruh ulasan & penilaian bintang dari tabel user_profiles / user_feedbacks untuk akun Admin
   async fetchAllUserFeedbacks(): Promise<Array<{
     id: string;
     email?: string;
@@ -971,68 +1321,119 @@ export const dbService = {
     updatedAt?: string;
     firstAppOpenAt?: string;
   }>> {
-    const client = getSupabase();
-    try {
-      const { data, error } = await client
-        .from('user_profiles')
-        .select('id, email, full_name, avatar_url, feedback, first_app_open_at, created_at, updated_at');
+    const res = await this.fetchAllUserFeedbacksWithStatus();
+    return res.feedbacks;
+  },
 
-      if (error) {
-        console.warn('Gagal memuat feedback pengguna dari Supabase:', error.message);
-        return [];
-      }
+  // ============================================================================
+  // KALENDER JADWAL ACARA (calendar_events) - RLS BERDASARKAN user_id
+  // ============================================================================
 
-      if (!data) return [];
-
-      const feedbacks: Array<{
-        id: string;
-        email?: string;
-        fullName: string;
-        avatarUrl?: string;
-        rating: number;
-        suggestions: string;
-        tags?: string[];
-        submittedAt?: string;
-        updatedAt?: string;
-        firstAppOpenAt?: string;
-      }> = [];
-
-      data.forEach((row: any) => {
-        let parsedFb = row.feedback;
-        if (typeof parsedFb === 'string') {
-          try {
-            parsedFb = JSON.parse(parsedFb);
-          } catch {}
-        }
-
-        if (parsedFb && (parsedFb.rating || parsedFb.suggestions)) {
-          feedbacks.push({
-            id: row.id,
-            email: row.email || undefined,
-            fullName: row.full_name || 'Pengguna',
-            avatarUrl: row.avatar_url || undefined,
-            rating: Number(parsedFb.rating) || 5,
-            suggestions: parsedFb.suggestions || '',
-            tags: Array.isArray(parsedFb.tags) ? parsedFb.tags : [],
-            submittedAt: parsedFb.submittedAt || row.updated_at || row.created_at,
-            updatedAt: parsedFb.updatedAt,
-            firstAppOpenAt: row.first_app_open_at,
-          });
-        }
-      });
-
-      // Urutkan dari ulasan terbaru
-      feedbacks.sort((a, b) => {
-        const timeA = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
-        const timeB = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
-        return timeB - timeA;
-      });
-
-      return feedbacks;
-    } catch (err) {
-      console.error('Error fetching feedbacks for admin:', err);
-      return [];
+  async fetchCalendarEvents(userId?: string): Promise<{
+    events: CalendarEvent[];
+    tableMissing: boolean;
+    error?: string;
+  }> {
+    if (!isSupabaseConfigured()) {
+      return { events: [], tableMissing: false };
     }
+    const check = await verifyActiveSupabaseSession(userId, false);
+    if (check.ok === false) {
+      return { events: [], tableMissing: false, error: check.error.message };
+    }
+    const { data, error } = await check.client
+      .from('calendar_events')
+      .select('*')
+      .eq('user_id', check.userId)
+      .order('event_date', { ascending: true })
+      .order('event_time', { ascending: true });
+
+    if (error) {
+      const tableMissing =
+        error.code === 'PGRST205' ||
+        error.code === '42P01' ||
+        error.message?.includes('calendar_events');
+      return { events: [], tableMissing: Boolean(tableMissing), error: error.message };
+    }
+
+    const events: CalendarEvent[] = (data || []).map((ev: any) => ({
+      id: ev.id,
+      userId: ev.user_id,
+      title: ev.title,
+      description: ev.description || '',
+      date: ev.event_date,
+      time: ev.event_time || undefined,
+      category: (ev.category || 'pribadi') as CalendarEventCategory,
+      completed: Boolean(ev.completed),
+      createdAt: ev.created_at || new Date().toISOString(),
+      updatedAt: ev.updated_at || undefined,
+    }));
+
+    return { events, tableMissing: false };
+  },
+
+  async upsertCalendarEvent(userId: string | undefined, event: CalendarEvent) {
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { data: null, error: check.error, tableMissing: false, sessionUser: null as User | null };
+    }
+    const res = await check.client
+      .from('calendar_events')
+      .upsert(
+        {
+          id: event.id,
+          user_id: check.userId,
+          title: event.title,
+          description: event.description || '',
+          event_date: event.date,
+          event_time: event.time || null,
+          category: event.category || 'pribadi',
+          completed: Boolean(event.completed),
+          created_at: event.createdAt || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      )
+      .select()
+      .single();
+
+    const tableMissing = Boolean(
+      res.error &&
+        (res.error.code === 'PGRST205' ||
+          res.error.code === '42P01' ||
+          res.error.message?.includes('calendar_events'))
+    );
+
+    return {
+      ...res,
+      tableMissing,
+      sessionUser: check.sessionUser,
+    };
+  },
+
+  async deleteCalendarEvent(userId: string | undefined, eventId: string) {
+    const check = await verifyActiveSupabaseSession(userId, true);
+    if (check.ok === false) {
+      return { data: null, error: check.error, tableMissing: false, sessionUser: null as User | null };
+    }
+    const res = await check.client
+      .from('calendar_events')
+      .delete()
+      .eq('id', eventId)
+      .eq('user_id', check.userId);
+
+    const tableMissing = Boolean(
+      res.error &&
+        (res.error.code === 'PGRST205' ||
+          res.error.code === '42P01' ||
+          res.error.message?.includes('calendar_events'))
+    );
+
+    return {
+      ...res,
+      tableMissing,
+      sessionUser: check.sessionUser,
+    };
   },
 
   // ============================================================================
@@ -1237,6 +1638,8 @@ export const dbService = {
       { key: 'wallets', label: 'Dompet & Transaksi (wallets)' },
       { key: 'targets', label: 'Target & Sasaran (targets)' },
       { key: 'habits', label: 'Pelacak Kebiasaan (habits)' },
+      { key: 'calendar_events', label: 'Kalender Jadwal Acara (calendar_events)' },
+      { key: 'user_feedbacks', label: 'Penilaian & Saran Pengguna (user_feedbacks)' },
       { key: 'announcements', label: 'Pemberitahuan Aplikasi (announcements)' },
       { key: 'pdf_reports', label: 'Arsip Laporan PDF Bulanan (pdf_reports)' },
     ];
@@ -1377,6 +1780,18 @@ export const subscribeToRealtimeSync = (
       {
         event: '*',
         schema: 'public',
+        table: 'calendar_events',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        handlers.onRefreshNeeded('calendar_events', payload.eventType);
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
         table: 'announcements',
       },
       (payload) => {
@@ -1391,5 +1806,60 @@ export const subscribeToRealtimeSync = (
 
   return () => {
     client.removeChannel(channel);
+  };
+};
+
+// Realtime channel khusus Admin untuk menerima setiap saran & penilaian baru dari seluruh pengguna
+export const subscribeToAllFeedbacks = (
+  onFeedbackChanged: () => void,
+  onStatusChange?: (status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR') => void
+): (() => void) => {
+  if (!isSupabaseConfigured()) {
+    return () => {};
+  }
+
+  const client = getSupabase();
+  const channelName = `realtime-admin-feedbacks-${Date.now().toString(36)}`;
+
+  const channel: RealtimeChannel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'user_profiles',
+      },
+      () => {
+        onFeedbackChanged();
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'user_feedbacks',
+      },
+      () => {
+        onFeedbackChanged();
+      }
+    )
+    .subscribe((status) => {
+      if (
+        onStatusChange &&
+        (status === 'SUBSCRIBED' ||
+          status === 'TIMED_OUT' ||
+          status === 'CLOSED' ||
+          status === 'CHANNEL_ERROR')
+      ) {
+        onStatusChange(status);
+      }
+    });
+
+  return () => {
+    try {
+      client.removeChannel(channel);
+    } catch {}
   };
 };

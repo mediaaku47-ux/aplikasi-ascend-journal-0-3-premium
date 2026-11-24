@@ -76,7 +76,7 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
 
     try {
       // 1. Eksekusi transaksi atomik (PDF dibuat -> diunggah ke Storage -> Metadata dicatat -> Reset data HANYA jika sukses)
-      setStepMessage('Mengunggah berkas PDF ke Supabase Storage (monthly-reports)...');
+      setStepMessage('Mengunggah berkas PDF ke penyimpanan cloud (monthly-reports)...');
       
       const result = await archiveMonthAndReset({
         userId,

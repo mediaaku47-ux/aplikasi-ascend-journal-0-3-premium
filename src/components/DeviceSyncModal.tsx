@@ -241,7 +241,7 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
                 <div className={`text-xs font-bold flex items-center gap-1.5 ${
                   isLight ? 'text-slate-900' : 'text-white'
                 }`}>
-                  <span>Sinkronisasi Supabase Cloud</span>
+                  <span>Sinkronisasi Akun Cloud</span>
                   <span className={`text-[10px] font-normal ${isLight ? 'text-teal-700' : 'text-teal-300'}`}>Tersedia</span>
                 </div>
                 <div className={`text-[11px] ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
@@ -256,7 +256,7 @@ export const DeviceSyncModal: React.FC<DeviceSyncModalProps> = ({
               }}
               className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shrink-0 transition-all cursor-pointer shadow-sm"
             >
-              {currentUser ? 'Lihat Status' : 'Gunakan Supabase'}
+              {currentUser ? 'Lihat Status' : 'Gunakan Cloud'}
             </button>
           </div>
         )}

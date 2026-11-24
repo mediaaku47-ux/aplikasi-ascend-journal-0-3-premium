@@ -122,7 +122,7 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
         setTaskTitle('');
         setTaskFlagged(false);
       } catch (err: any) {
-        setSubmitError(err?.message || 'Gagal menyimpan agenda ke Supabase.');
+        setSubmitError(err?.message || 'Gagal menyimpan agenda ke cloud.');
         setIsSubmitting(false);
         return;
       }
@@ -536,7 +536,7 @@ export const NewEntryModal: React.FC<NewEntryModalProps> = ({
               } disabled:opacity-50 disabled:cursor-wait rounded-xl shadow-md cursor-pointer transition-all`}
             >
               {isSubmitting
-                ? 'Menyimpan ke Supabase...'
+                ? 'Menyimpan ke cloud...'
                 : activeType === 'task'
                 ? 'Simpan Agenda'
                 : activeType === 'habit'

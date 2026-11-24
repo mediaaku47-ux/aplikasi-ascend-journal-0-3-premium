@@ -98,8 +98,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [photoSuccess, setPhotoSuccess] = useState<string | null>(null);
 
   // Password change state
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
@@ -256,6 +258,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setPasswordError(null);
     setPasswordSuccess(null);
 
+    if (!currentPassword.trim()) {
+      setPasswordError('Masukkan kata sandi lama Anda terlebih dahulu.');
+      return;
+    }
+
     if (!hasMinLength) {
       setPasswordError('Kata sandi baru minimal 8 karakter.');
       return;
@@ -276,18 +283,27 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       return;
     }
 
+    if (currentPassword === newPassword) {
+      setPasswordError('Kata sandi baru harus berbeda dengan kata sandi lama.');
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
-      setPasswordError('Konfirmasi kata sandi baru tidak sama.');
+      setPasswordError('Verifikasi kata sandi baru tidak sama.');
       return;
     }
 
     setIsUpdatingPassword(true);
 
     try {
-      await authService.updatePassword(newPassword);
+      await authService.updatePassword(newPassword, currentPassword);
       setPasswordSuccess('Kata sandi akun Anda berhasil diganti!');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      setShowCurrentPassword(false);
+      setShowPassword(false);
+      setShowConfirmPassword(false);
       onShowToast?.('Kata sandi berhasil diperbarui!');
       setTimeout(() => {
         setActiveModal(null);
@@ -295,7 +311,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       }, 900);
     } catch (err: any) {
       setPasswordError(
-        err?.message || 'Gagal mengubah kata sandi. Pastikan akun Supabase Anda terhubung.'
+        err?.message || 'Gagal mengubah kata sandi. Pastikan akun cloud Anda terhubung.'
       );
     } finally {
       setIsUpdatingPassword(false);
@@ -565,7 +581,36 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       </div>
                     )}
 
-                    {/* Input Kata Sandi Baru */}
+                    {/* 1. Input Kata Sandi Lama */}
+                    <div>
+                      <label className={`block text-xs font-semibold mb-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                        Kata Sandi Lama
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showCurrentPassword ? 'text' : 'password'}
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          placeholder="Masukkan kata sandi saat ini"
+                          autoComplete="current-password"
+                          className={`w-full text-xs sm:text-sm pl-3.5 pr-10 py-2.5 rounded-xl border outline-hidden transition-all ${
+                            isLight
+                              ? 'bg-slate-50 border-slate-300 text-slate-800 focus:border-emerald-700 focus:bg-white'
+                              : 'bg-black/25 border-white/10 text-white focus:border-cyan-400 focus:bg-black/40'
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                          className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                          aria-label={showCurrentPassword ? 'Sembunyikan kata sandi lama' : 'Tampilkan kata sandi lama'}
+                        >
+                          {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 2. Input Kata Sandi Baru */}
                     <div>
                       <label className={`block text-xs font-semibold mb-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
                         Kata Sandi Baru
@@ -576,6 +621,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder="Minimal 8 karakter unik"
+                          autoComplete="new-password"
                           className={`w-full text-xs sm:text-sm pl-3.5 pr-10 py-2.5 rounded-xl border outline-hidden transition-all ${
                             isLight
                               ? 'bg-slate-50 border-slate-300 text-slate-800 focus:border-emerald-700 focus:bg-white'
@@ -586,23 +632,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
                           className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                          aria-label={showPassword ? 'Sembunyikan kata sandi baru' : 'Tampilkan kata sandi baru'}
                         >
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
                     </div>
 
-                    {/* Input Konfirmasi Kata Sandi */}
+                    {/* 3. Input Verifikasi Kata Sandi Baru */}
                     <div>
                       <label className={`block text-xs font-semibold mb-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
-                        Konfirmasi Kata Sandi Baru
+                        Verifikasi Kata Sandi Baru
                       </label>
                       <div className="relative">
                         <input
                           type={showConfirmPassword ? 'text' : 'password'}
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="Ulangi kata sandi baru"
+                          placeholder="Ulangi kata sandi baru untuk verifikasi"
+                          autoComplete="new-password"
                           className={`w-full text-xs sm:text-sm pl-3.5 pr-10 py-2.5 rounded-xl border outline-hidden transition-all ${
                             isLight
                               ? 'bg-slate-50 border-slate-300 text-slate-800 focus:border-emerald-700 focus:bg-white'
@@ -613,17 +661,27 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           type="button"
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                           className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                          aria-label={showConfirmPassword ? 'Sembunyikan verifikasi kata sandi' : 'Tampilkan verifikasi kata sandi'}
                         >
                           {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                      {confirmPassword.length > 0 && (
+                        <p className={`mt-1 text-[11px] font-medium ${
+                          passwordsMatch
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-rose-500 dark:text-rose-400'
+                        }`}>
+                          {passwordsMatch ? 'Verifikasi kata sandi cocok.' : 'Verifikasi kata sandi belum cocok.'}
+                        </p>
+                      )}
                     </div>
 
                     {/* Tombol Simpan Sandi */}
                     <div className="pt-2 flex justify-end">
                       <button
                         type="submit"
-                        disabled={isUpdatingPassword || !newPassword}
+                        disabled={isUpdatingPassword || !currentPassword || !newPassword || !confirmPassword}
                         className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50 ${
                           isLight
                             ? 'bg-emerald-950 text-white hover:bg-emerald-900 active:scale-98'
@@ -974,14 +1032,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       </div>
 
-      {/* Footer ringkas: info email & status identitas */}
-      <footer className={`max-w-2xl mx-auto px-6 py-4 text-center text-xs ${
+      {/* Footer ringkas: info email */}
+      <footer className={`max-w-2xl mx-auto px-6 py-5 text-center text-xs flex flex-col items-center gap-2 ${
         isLight ? 'text-slate-600' : 'text-slate-300'
       }`}>
         <div>
           <span>{currentUser?.email || 'kamalizudin36@gmail.com'}</span>
-          <span className="mx-2">&bull;</span>
-          <span>ASCEND Journal</span>
         </div>
       </footer>
 

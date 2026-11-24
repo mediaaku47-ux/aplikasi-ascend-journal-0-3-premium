@@ -57,6 +57,8 @@ export interface AppFeedback {
   tags?: string[];
 }
 
+export type OnboardingFocus = 'productivity' | 'habits' | 'finance' | 'all';
+
 export interface UserProfile {
   name: string;
   email?: string;
@@ -74,6 +76,11 @@ export interface UserProfile {
   firstAppOpenAt?: string; // Waktu pertama kali membuka / masuk aplikasi (ISO)
   accountCreatedAt?: string; // Waktu akun pertama kali dibuat (ISO)
   feedback?: AppFeedback; // Data rating bintang dan saran pengguna
+  primaryFocus?: OnboardingFocus;
+  reminderEnabled?: boolean;
+  notificationPermission?: 'granted' | 'denied' | 'default' | 'unsupported';
+  onboardingCompleted?: boolean;
+  onboardingCompletedAt?: string;
 }
 
 export type TargetPeriod = 'daily' | 'monthly' | 'weekly';
@@ -124,7 +131,22 @@ export interface AppAnnouncement {
   expiresAt?: string;
 }
 
-export type NavTab = 'dashboard' | 'progress' | 'agenda' | 'habits' | 'targets' | 'finance' | 'notes' | 'archive' | 'settings' | 'help' | 'profile' | 'admin-feedback' | 'notifications' | 'admin-portal';
+export type CalendarEventCategory = 'webinar' | 'deadline' | 'pribadi' | 'kerja' | 'lainnya' | (string & {});
+
+export interface CalendarEvent {
+  id: string;
+  userId?: string;
+  title: string;
+  description?: string;
+  date: string; // YYYY-MM-DD
+  time?: string; // HH:mm
+  category: CalendarEventCategory;
+  completed: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type NavTab = 'dashboard' | 'progress' | 'agenda' | 'calendar' | 'habits' | 'targets' | 'finance' | 'notes' | 'archive' | 'settings' | 'help' | 'profile' | 'admin-feedback' | 'notifications' | 'admin-portal';
 
 export type PdfReportStatus = 'Tersedia' | 'Kedaluwarsa' | 'Sedang Diproses' | 'Gagal';
 

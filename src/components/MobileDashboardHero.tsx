@@ -17,7 +17,8 @@ import {
   Habit, 
   TargetItem, 
   QuickNote, 
-  AppAnnouncement 
+  AppAnnouncement,
+  CalendarEvent
 } from '../types';
 import { GlobalSearchBar } from './GlobalSearchBar';
 import { AscendBrand } from './AscendBrand';
@@ -40,6 +41,7 @@ interface MobileDashboardHeroProps {
   habits?: Habit[];
   targets?: TargetItem[];
   notes?: QuickNote[];
+  calendarEvents?: CalendarEvent[];
   levelProgress?: UserLevelProgress;
   onOpenNewEntry: (type?: 'task' | 'habit' | 'transaction' | 'note') => void;
   onAddTransaction?: (tx: Transaction) => void;
@@ -77,6 +79,7 @@ export const MobileDashboardHero: React.FC<MobileDashboardHeroProps> = ({
   habits = [],
   targets = [],
   notes = [],
+  calendarEvents = [],
   levelProgress,
   onOpenNewEntry,
   onAddTransaction,
@@ -174,6 +177,7 @@ export const MobileDashboardHero: React.FC<MobileDashboardHeroProps> = ({
         <div className="flex items-center min-w-0">
           <AscendBrand 
             size="md" 
+            theme="dark"
             onClick={() => onNavigateToTab('dashboard')} 
             showDot={false} 
           />
@@ -242,25 +246,26 @@ export const MobileDashboardHero: React.FC<MobileDashboardHeroProps> = ({
       {/* 2. PENCARIAN GLOBAL REAL-TIME DI ATAS KARTU DOMPET OPERASIONAL */}
       <div className="w-full mb-3.5 sm:mb-4 relative z-30">
         <GlobalSearchBar
+          id="mobile-hero-global-search"
           tasks={tasks}
           habits={habits}
           notes={notes}
           transactions={transactions}
           targets={targets}
+          calendarEvents={calendarEvents}
           onNavigateToTab={onNavigateToTab}
           theme={theme}
-          placeholder="Cari agenda, kebiasaan, catatan, transaksi..."
+          placeholder="Cari agenda, acara, kebiasaan, catatan, transaksi..."
         />
       </div>
 
-      {/* 2.5. KARTU SALDO KAS & TRANSAKSI (DOMPET OPERASIONAL) */}
       {/* 2.5. KARTU SALDO KAS & TRANSAKSI (DOMPET OPERASIONAL) */}
       <section 
         className={`w-full rounded-[14px] sm:rounded-[16px] relative z-10 transition-all duration-300 ${
           isLight 
             ? 'bg-gradient-to-br from-[#064E3B] via-[#043E30] to-[#022C22] border border-emerald-500/40 text-white shadow-[0_12px_28px_-6px_rgba(4,62,48,0.35)]' 
             : 'bg-gradient-to-br from-[#111A29] via-[#0D1624] to-[#080E17] border border-emerald-500/35 text-white shadow-2xl'
-        } p-4 sm:p-5 relative overflow-hidden mb-4 sm:mb-5`}
+        } p-4 sm:p-5 pb-7 sm:pb-8 relative overflow-hidden mb-0`}
       >
         {/* Top subtle highlight line for sleek tech look */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent opacity-80" />
@@ -363,7 +368,75 @@ export const MobileDashboardHero: React.FC<MobileDashboardHeroProps> = ({
         </div>
       </section>
 
-      {/* 3. KARTU AKSES CEPAT (Aksi Harian Mandiri) */}
+      {/* 3. KARTU TANGGAL HARI INI (Di bawah & sedikit menimpa kartu hijau) */}
+      <div className="w-full px-3 sm:px-4 -mt-4 sm:-mt-5 mb-4 sm:mb-5 relative z-20">
+        <div 
+          onClick={() => onNavigateToTab('agenda')}
+          className={`w-full rounded-xl sm:rounded-2xl px-2.5 py-2 sm:px-3 sm:py-2.5 relative overflow-hidden transition-all duration-300 ease-out hover:-translate-y-0.5 cursor-pointer active:scale-[0.99] border-[1.5px] backdrop-blur-xl group ${
+            isLight
+              ? 'bg-white border-teal-600/55 text-slate-800 shadow-[0_8px_20px_-4px_rgba(4,62,48,0.16)] hover:border-teal-700/80 hover:bg-white'
+              : 'bg-[#111827] border-teal-400/45 text-white shadow-[0_10px_24px_-6px_rgba(0,0,0,0.65)] hover:border-cyan-400/70'
+          }`}
+          style={{ fontFamily: "'Poppins', 'Inter', -apple-system, sans-serif" }}
+        >
+          {/* Top accent light bar - halus dan tipis */}
+          <div className={`absolute top-0 inset-x-0 h-[1.5px] opacity-70 ${
+            isLight 
+              ? 'bg-gradient-to-r from-teal-400/60 via-emerald-400/50 to-teal-400/60' 
+              : 'bg-gradient-to-r from-cyan-400/60 via-teal-300/40 to-blue-400/60'
+          }`} />
+
+          {/* Sci-Fi HUD Corner Brackets */}
+          <div className={`absolute top-1 left-1.5 text-[8px] font-mono font-bold pointer-events-none select-none ${
+            isLight ? 'text-teal-600/35' : 'text-cyan-400/40'
+          }`}>┌</div>
+          <div className={`absolute bottom-1 right-1.5 text-[8px] font-mono font-bold pointer-events-none select-none ${
+            isLight ? 'text-teal-600/35' : 'text-cyan-400/40'
+          }`}>┘</div>
+
+          {/* Ambient Glow Halus Tipis */}
+          <div 
+            className="absolute -right-6 -top-6 w-24 h-24 rounded-full pointer-events-none blur-2xl opacity-10"
+            style={{ 
+              background: isLight 
+                ? 'radial-gradient(circle, rgba(45, 212, 191, 0.4) 0%, transparent 70%)' 
+                : 'radial-gradient(circle, rgba(6, 182, 212, 0.3) 0%, transparent 70%)' 
+            }}
+          />
+
+          <div className="flex items-center gap-2.5 relative z-10 px-0.5">
+            {/* Ikon Kalender Modern */}
+            <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-2xs ${
+              isLight 
+                ? 'bg-teal-50/80 border-teal-200/90 text-teal-700' 
+                : 'bg-[#1e293b] border-[#263449] text-cyan-300'
+            }`}>
+              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.2]" />
+            </div>
+            {/* Teks Tanggal Lengkap */}
+            <div className="min-w-0 flex-1">
+              <span 
+                className={`text-[9px] sm:text-[9.5px] font-bold tracking-wider uppercase block leading-none mb-0.5 ${
+                  isLight ? 'text-teal-700' : 'text-teal-300'
+                }`}
+                style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+              >
+                Hari Ini
+              </span>
+              <h3 
+                className={`text-xs sm:text-[13px] font-bold tracking-tight truncate leading-tight ${
+                  isLight ? 'text-slate-900' : 'text-white'
+                }`}
+                style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+              >
+                {realToday.fullFormattedDate}
+              </h3>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. KARTU AKSES CEPAT (Aksi Harian Mandiri) */}
       <div className="mb-4 sm:mb-5">
         <QuickAccessSection
           onNavigateToTab={onNavigateToTab}
@@ -377,74 +450,6 @@ export const MobileDashboardHero: React.FC<MobileDashboardHeroProps> = ({
           onOpenNewEntry={onOpenNewEntry}
           currencySymbol={currencySymbol}
         />
-      </div>
-
-      {/* 4. KARTU TANGGAL HARI INI (Elegan Tipis, Tanpa Hijau Gelap Mencolok) */}
-      <div className="w-full mb-4 sm:mb-5 relative z-10">
-        <div 
-          onClick={() => onNavigateToTab('agenda')}
-          className={`w-full rounded-2xl sm:rounded-3xl p-3.5 sm:p-4.5 relative overflow-hidden transition-all duration-300 ease-out hover:-translate-y-0.5 cursor-pointer active:scale-[0.99] border backdrop-blur-xl group ${
-            isLight
-              ? 'bg-gradient-to-r from-teal-500/[0.08] via-emerald-500/[0.05] to-teal-500/[0.06] border-teal-500/25 text-slate-800 shadow-[0_4px_16px_rgba(0,0,0,0.04)] hover:border-teal-400/50 hover:bg-teal-500/[0.12]'
-              : 'bg-[#111827] border border-[#263449] text-white shadow-md hover:border-cyan-400/40'
-          }`}
-          style={{ fontFamily: "'Poppins', 'Inter', -apple-system, sans-serif" }}
-        >
-          {/* Top accent light bar - halus dan tipis */}
-          <div className={`absolute top-0 inset-x-0 h-[2px] opacity-70 ${
-            isLight 
-              ? 'bg-gradient-to-r from-teal-400/60 via-emerald-400/50 to-teal-400/60' 
-              : 'bg-gradient-to-r from-cyan-400/60 via-teal-300/40 to-blue-400/60'
-          }`} />
-
-          {/* Sci-Fi HUD Corner Brackets */}
-          <div className={`absolute top-2 left-2 text-[10px] font-mono font-bold pointer-events-none select-none ${
-            isLight ? 'text-teal-600/35' : 'text-cyan-400/40'
-          }`}>┌</div>
-          <div className={`absolute bottom-2 right-2 text-[10px] font-mono font-bold pointer-events-none select-none ${
-            isLight ? 'text-teal-600/35' : 'text-cyan-400/40'
-          }`}>┘</div>
-
-          {/* Ambient Glow Halus Tipis */}
-          <div 
-            className="absolute -right-8 -top-8 w-36 h-36 rounded-full pointer-events-none blur-2xl opacity-10"
-            style={{ 
-              background: isLight 
-                ? 'radial-gradient(circle, rgba(45, 212, 191, 0.4) 0%, transparent 70%)' 
-                : 'radial-gradient(circle, rgba(6, 182, 212, 0.3) 0%, transparent 70%)' 
-            }}
-          />
-
-          <div className="flex items-center gap-3 sm:gap-3.5 relative z-10 py-0.5 px-1">
-            {/* Ikon Kalender Modern */}
-            <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 border shadow-2xs ${
-              isLight 
-                ? 'bg-white border-teal-200/90 text-teal-700' 
-                : 'bg-[#1e293b] border-[#263449] text-cyan-300'
-            }`}>
-              <Calendar className="w-5 h-5 stroke-[2.2]" />
-            </div>
-            {/* Teks Tanggal Lengkap */}
-            <div className="min-w-0 flex-1">
-              <span 
-                className={`text-[10.5px] sm:text-[11px] font-bold tracking-wider uppercase block mb-0.5 ${
-                  isLight ? 'text-teal-700' : 'text-teal-300'
-                }`}
-                style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-              >
-                Hari Ini
-              </span>
-              <h3 
-                className={`text-sm sm:text-base font-bold tracking-tight truncate leading-snug ${
-                  isLight ? 'text-slate-900' : 'text-white'
-                }`}
-                style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-              >
-                {realToday.fullFormattedDate}
-              </h3>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 5. SECTION FITUR UTAMA (Halaman Terbuka, Tanpa Menggunakan Kartu) */}
@@ -765,6 +770,45 @@ export const MobileDashboardHero: React.FC<MobileDashboardHeroProps> = ({
               style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600 }}
             >
               Arsip
+            </span>
+          </button>
+
+          {/* 8. Kalender Jadwal Acara */}
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('calendar')}
+            className="flex flex-col items-center justify-start w-full cursor-pointer group active:scale-95 transition-transform"
+            title="Buka Kalender Jadwal Acara"
+          >
+            <div 
+              style={{ width: '56px', height: '56px' }}
+              className={`w-[56px] h-[56px] rounded-2xl border flex items-center justify-center shrink-0 transition-all duration-200 group-hover:scale-105 ${
+                isLight 
+                  ? 'bg-white border-slate-200/80 shadow-[0_3px_10px_rgba(0,0,0,0.03)] group-hover:border-slate-300 group-hover:shadow-md' 
+                  : 'bg-[#141F36] border-slate-700/60 shadow-[0_3px_10px_rgba(0,0,0,0.25)] group-hover:border-slate-600 group-hover:shadow-lg'
+              }`}
+            >
+              <div 
+                style={{ width: '44px', height: '44px' }}
+                className="w-[44px] h-[44px] flex items-center justify-center relative overflow-hidden rounded-xl"
+              >
+                <img
+                  src="/assets/aistudio/calendar-clock-icon_34472_41d92f8e.png"
+                  alt="Kalender"
+                  style={{ objectFit: 'contain', width: '44px', height: '44px' }}
+                  className="w-[44px] h-[44px] object-contain select-none pointer-events-none drop-shadow-sm transition-transform duration-200 group-hover:scale-105"
+                  loading="eager"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </div>
+            <span 
+              className={`mt-1.5 text-center text-[11px] leading-tight font-semibold tracking-tight line-clamp-2 max-w-[68px] break-words transition-colors ${
+                isLight ? 'text-slate-800 group-hover:text-slate-950' : 'text-slate-200 group-hover:text-white'
+              }`}
+              style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600 }}
+            >
+              Kalender
             </span>
           </button>
 

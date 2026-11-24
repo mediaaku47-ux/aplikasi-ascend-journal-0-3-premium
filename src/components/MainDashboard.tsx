@@ -8,6 +8,7 @@ import { AscendDesktopDashboard } from './AscendDesktopDashboard';
 import { GlobalSearchBar } from './GlobalSearchBar';
 import { PageTransitionSkeleton } from './PageTransitionSkeleton';
 import { AdminAnnouncementsModal } from './AdminAnnouncementsModal';
+import { HomeOnboardingTour } from './HomeOnboardingTour';
 import { dbService, subscribeToRealtimeSync, CloudFullData, isValidSupabaseUserId } from '../lib/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { checkIsAdminUser } from '../utils/admin';
@@ -38,6 +39,7 @@ import { AdminFeedbackView } from './Views/AdminFeedbackView';
 import { AdminPortalView } from './Views/AdminPortalView';
 import { SettingsView } from './Views/SettingsView';
 import { NotificationsView } from './Views/NotificationsView';
+import { EventCalendarView } from './Views/EventCalendarView';
 
 import { useDeviceNotifications } from '../hooks/useDeviceNotifications';
 import {
@@ -57,7 +59,8 @@ import {
   UserProfile, 
   NavTab,
   TargetItem,
-  AppAnnouncement
+  AppAnnouncement,
+  CalendarEvent
 } from '../types';
 import { 
   initialTasks, 
@@ -200,6 +203,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     habits: 0,
     wallets: 0,
     targets: 0,
+    calendar: 0,
   });
 
   // App Data State with LocalStorage Initialization
@@ -332,6 +336,15 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       return [];
     }
   });
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('journalstream_calendar_events');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isCalendarTableMissing, setIsCalendarTableMissing] = useState<boolean>(false);
   const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState<boolean>(() => isValidSupabaseUserId(currentUser?.id));
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
 
@@ -645,6 +658,13 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     } catch {}
   }, [targets, isLoadingFromSupabase]);
 
+  useEffect(() => {
+    if (isLoadingFromSupabase) return;
+    try {
+      localStorage.setItem('journalstream_calendar_events', JSON.stringify(calendarEvents));
+    } catch {}
+  }, [calendarEvents, isLoadingFromSupabase]);
+
   const handleResetToCleanState = () => {
     setUserProfile({
       ...initialUserProfile,
@@ -659,6 +679,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setTransactions([]);
     setQuickNotes([]);
     setTargets([]);
+    setCalendarEvents([]);
     setTotalBalance(0);
     setSavingsBalance(0);
 
@@ -669,6 +690,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     localStorage.removeItem('journalstream_quick_notes');
     localStorage.removeItem('journalstream_targets');
     localStorage.removeItem('journalstream_target_extras');
+    localStorage.removeItem('journalstream_calendar_events');
     localStorage.removeItem('journalstream_total_balance');
     localStorage.removeItem('journalstream_savings_balance');
     localStorage.removeItem('ascend_device_notification_settings');
@@ -768,10 +790,21 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         }
       }
     }
+    if (data.calendarEventsTableMissing !== undefined) {
+      setIsCalendarTableMissing(Boolean(data.calendarEventsTableMissing));
+    }
+    if (data.calendarEvents !== undefined) {
+      if (sourceTable !== 'calendar_events' || now - lastMutationTimeRef.current.calendar > MUTATION_PROTECT_MS) {
+        if (!data.calendarEventsTableMissing) {
+          setCalendarEvents(data.calendarEvents);
+        }
+      }
+    }
     if (data.userProfile) {
       setUserProfile((prev) => ({
         ...prev,
         ...data.userProfile,
+        feedback: data.userProfile?.feedback ?? prev.feedback,
       }));
     }
   };
@@ -878,16 +911,34 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             setTargets(cloudData.targets);
           }
         }
+        if (cloudData.calendarEventsTableMissing !== undefined) {
+          setIsCalendarTableMissing(Boolean(cloudData.calendarEventsTableMissing));
+        }
+        if (cloudData.calendarEvents !== undefined && !cloudData.calendarEventsTableMissing) {
+          if (Date.now() - lastMutationTimeRef.current.calendar > 5000) {
+            setCalendarEvents(cloudData.calendarEvents);
+          }
+        }
         if (cloudData.userProfile) {
           setUserProfile((prev) => {
-            const resolvedName = (cloudData.userProfile?.name && cloudData.userProfile.name !== 'Pengguna')
+            const preferPrevOnboarding = Boolean(prev.onboardingCompleted && prev.name);
+            const resolvedName = preferPrevOnboarding
+              ? prev.name
+              : (cloudData.userProfile?.name && cloudData.userProfile.name !== 'Pengguna')
               ? cloudData.userProfile.name
               : (currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || (currentUser?.email ? currentUser.email.split('@')[0] : '') || cloudData.userProfile?.name || prev.name);
 
             return {
               ...prev,
               ...cloudData.userProfile,
+              feedback: cloudData.userProfile?.feedback ?? prev.feedback,
               name: resolvedName,
+              greetingTitle: preferPrevOnboarding ? prev.greetingTitle : (cloudData.userProfile?.greetingTitle || prev.greetingTitle),
+              greetingSubtitle: preferPrevOnboarding ? prev.greetingSubtitle : (cloudData.userProfile?.greetingSubtitle || prev.greetingSubtitle),
+              primaryFocus: prev.primaryFocus ?? cloudData.userProfile?.primaryFocus ?? currentUser?.user_metadata?.primary_focus,
+              reminderEnabled: prev.reminderEnabled ?? cloudData.userProfile?.reminderEnabled ?? currentUser?.user_metadata?.reminder_enabled,
+              notificationPermission: prev.notificationPermission ?? cloudData.userProfile?.notificationPermission ?? currentUser?.user_metadata?.notification_permission,
+              onboardingCompleted: prev.onboardingCompleted ?? cloudData.userProfile?.onboardingCompleted ?? Boolean(currentUser?.user_metadata?.onboarding_completed),
               email: currentUser?.email || cloudData.userProfile?.email || prev.email,
               monthIndex: prev.monthIndex ?? realToday.monthIndex,
               year: prev.year ?? realToday.year,
@@ -1215,8 +1266,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     const res = await dbService.upsertAgenda(currentUser?.id, newTask);
     const err = (res as { error?: { code?: string; message?: string } | null })?.error;
     if (err) {
-      const errMsg = err.message || 'Gagal menyimpan agenda ke tabel Supabase.';
-      showToast(`Gagal masuk ke Supabase: ${errMsg}`);
+      const errMsg = err.message || 'Gagal menyimpan agenda ke cloud.';
+      showToast(`Gagal menyimpan ke cloud: ${errMsg}`);
       throw new Error(errMsg);
     }
 
@@ -1235,7 +1286,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     try {
       localStorage.setItem('journalstream_tasks', JSON.stringify(nextTasks));
     } catch {}
-    showToast('Agenda langsung tersimpan ke database Supabase!');
+    showToast('Agenda langsung tersimpan ke cloud!');
   };
 
   const handleUpdateTasks = async (newTasks: Task[]): Promise<void> => {
@@ -1243,8 +1294,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     const res = await dbService.syncAllAgendas(currentUser?.id, newTasks);
     const err = (res as { error?: { code?: string; message?: string } | null })?.error;
     if (err) {
-      const errMsg = err.message || 'Gagal menyinkronkan agenda ke database Supabase.';
-      showToast(`Gagal masuk ke Supabase: ${errMsg}`);
+      const errMsg = err.message || 'Gagal menyinkronkan agenda ke cloud.';
+      showToast(`Gagal menyinkronkan ke cloud: ${errMsg}`);
       throw new Error(errMsg);
     }
 
@@ -1260,6 +1311,162 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     } catch {}
   };
 
+  // Handler CRUD Kalender Jadwal Acara (dengan sinkronisasi Supabase RLS user_id + fallback lokal)
+  const handleSaveCalendarEvent = async (
+    event: CalendarEvent
+  ): Promise<{ ok: boolean; error?: string; tableMissing?: boolean }> => {
+    lastMutationTimeRef.current.calendar = Date.now();
+    const prevSnapshot = calendarEvents;
+    const exists = prevSnapshot.some((item) => item.id === event.id);
+    const nextEvents = exists
+      ? prevSnapshot.map((item) => (item.id === event.id ? event : item))
+      : [event, ...prevSnapshot];
+
+    setCalendarEvents(nextEvents);
+    try {
+      localStorage.setItem('journalstream_calendar_events', JSON.stringify(nextEvents));
+    } catch {}
+
+    if (!isSupabaseConfigured()) {
+      showToast('Acara disimpan di perangkat.');
+      return { ok: true };
+    }
+
+    const res = await dbService.upsertCalendarEvent(currentUser?.id, event);
+    if (res.sessionUser && res.sessionUser.id !== currentUser?.id) {
+      onUserChange?.(res.sessionUser);
+    }
+
+    if (res.tableMissing) {
+      setIsCalendarTableMissing(true);
+      showToast('Tersimpan di perangkat. Jalankan SQL calendar_events untuk sinkronisasi cloud.');
+      return { ok: false, tableMissing: true, error: res.error?.message };
+    }
+
+    if (res.error) {
+      setCalendarEvents(prevSnapshot);
+      try {
+        localStorage.setItem('journalstream_calendar_events', JSON.stringify(prevSnapshot));
+      } catch {}
+      showToast(`Gagal menyimpan ke cloud: ${res.error.message}`);
+      return { ok: false, error: res.error.message };
+    }
+
+    setIsCalendarTableMissing(false);
+    showToast(exists ? 'Jadwal acara diperbarui di cloud!' : 'Jadwal acara tersimpan ke cloud!');
+    return { ok: true };
+  };
+
+  const handleDeleteCalendarEvent = async (
+    id: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    lastMutationTimeRef.current.calendar = Date.now();
+    const prevSnapshot = calendarEvents;
+    const nextEvents = prevSnapshot.filter((item) => item.id !== id);
+
+    setCalendarEvents(nextEvents);
+    try {
+      localStorage.setItem('journalstream_calendar_events', JSON.stringify(nextEvents));
+    } catch {}
+
+    if (!isSupabaseConfigured()) {
+      showToast('Acara dihapus dari perangkat.');
+      return { ok: true };
+    }
+
+    const res = await dbService.deleteCalendarEvent(currentUser?.id, id);
+    if (res.sessionUser && res.sessionUser.id !== currentUser?.id) {
+      onUserChange?.(res.sessionUser);
+    }
+
+    if (res.tableMissing) {
+      setIsCalendarTableMissing(true);
+      showToast('Acara dihapus dari perangkat.');
+      return { ok: true };
+    }
+
+    if (res.error) {
+      setCalendarEvents(prevSnapshot);
+      try {
+        localStorage.setItem('journalstream_calendar_events', JSON.stringify(prevSnapshot));
+      } catch {}
+      showToast(`Gagal menghapus dari cloud: ${res.error.message}`);
+      return { ok: false, error: res.error.message };
+    }
+
+    setIsCalendarTableMissing(false);
+    showToast('Jadwal acara dihapus dari cloud.');
+    return { ok: true };
+  };
+
+  const handleToggleCalendarEvent = async (id: string): Promise<void> => {
+    const target = calendarEvents.find((item) => item.id === id);
+    if (!target) return;
+    await handleSaveCalendarEvent({
+      ...target,
+      completed: !target.completed,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  const handleRefreshCalendarEvents = async (): Promise<void> => {
+    if (!isSupabaseConfigured()) return;
+    const res = await dbService.fetchCalendarEvents(currentUser?.id);
+    setIsCalendarTableMissing(res.tableMissing);
+    if (!res.error && !res.tableMissing) {
+      setCalendarEvents(res.events);
+      try {
+        localStorage.setItem('journalstream_calendar_events', JSON.stringify(res.events));
+      } catch {}
+    } else if (res.error && !res.tableMissing) {
+      showToast(`Gagal memuat kalender: ${res.error}`);
+    }
+  };
+
+  // Sinkronisasi jujur untuk pembaruan profil dan pengiriman bintang & saran pengguna
+  const handlePersistProfileAndFeedback = async (
+    updatedProfile: UserProfile
+  ): Promise<{ ok: boolean; error?: string }> => {
+    setUserProfile(updatedProfile);
+    try {
+      localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+      if (updatedProfile.feedback) {
+        localStorage.setItem('journalstream_app_feedback', JSON.stringify(updatedProfile.feedback));
+        window.dispatchEvent(new CustomEvent('ascend-feedback-updated'));
+      }
+    } catch {}
+
+    if (!isSupabaseConfigured()) {
+      return { ok: true };
+    }
+
+    if (updatedProfile.feedback) {
+      const fbRes = await dbService.submitUserFeedback(
+        currentUser?.id,
+        updatedProfile,
+        updatedProfile.feedback
+      );
+      if (fbRes.sessionUser && fbRes.sessionUser.id !== currentUser?.id) {
+        onUserChange?.(fbRes.sessionUser);
+      }
+      if (!fbRes.ok) {
+        showToast(`Gagal menyimpan penilaian ke cloud: ${fbRes.error || 'Kesalahan server'}`);
+        return { ok: false, error: fbRes.error };
+      }
+      window.dispatchEvent(new CustomEvent('ascend-feedback-synced'));
+      return { ok: true };
+    }
+
+    const profRes = await dbService.syncProfile(currentUser?.id, updatedProfile);
+    if (profRes.sessionUser && profRes.sessionUser.id !== currentUser?.id) {
+      onUserChange?.(profRes.sessionUser);
+    }
+    if (profRes.error) {
+      return { ok: false, error: profRes.error.message };
+    }
+    return { ok: true };
+  };
+
 
 
   const handleAddHabit = (newHabit: Habit) => {
@@ -1267,7 +1474,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setHabits((prev) => [...prev, newHabit]);
     if (currentUser?.id) {
       dbService.upsertHabit(currentUser.id, newHabit)
-        .then(() => showToast('Kebiasaan tersimpan di Supabase!'))
+        .then(() => showToast('Kebiasaan tersimpan di cloud!'))
         .catch(console.warn);
     }
   };
@@ -1359,7 +1566,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
 
     if (currentUser?.id) {
       dbService.syncWallet(currentUser.id, newBal, updated, newSavings)
-        .then(() => showToast('Transaksi & Tabungan tersimpan di Supabase!'))
+        .then(() => showToast('Transaksi & Tabungan tersimpan di cloud!'))
         .catch(console.warn);
     }
   };
@@ -1394,7 +1601,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
 
       if (currentUser?.id) {
         dbService.syncWallet(currentUser.id, newBal, updated, newSavings)
-          .then(() => showToast('Saldo & Tabungan diperbarui di Supabase!'))
+          .then(() => showToast('Saldo & Tabungan diperbarui di cloud!'))
           .catch(console.warn);
       }
     }
@@ -1405,7 +1612,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setTotalBalance(newBal);
     if (currentUser?.id) {
       dbService.syncWallet(currentUser.id, newBal, transactions, savingsBalance)
-        .then(() => showToast('Saldo kas berhasil disimpan di Supabase!'))
+        .then(() => showToast('Saldo kas berhasil disimpan di cloud!'))
         .catch(console.warn);
     }
   };
@@ -1415,7 +1622,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setSavingsBalance(newSavings);
     if (currentUser?.id) {
       dbService.syncWallet(currentUser.id, totalBalance, transactions, newSavings)
-        .then(() => showToast('Saldo tabungan berhasil disimpan di Supabase!'))
+        .then(() => showToast('Saldo tabungan berhasil disimpan di cloud!'))
         .catch(console.warn);
     }
   };
@@ -1426,12 +1633,12 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     if (currentUser?.id) {
       dbService.upsertJournal(currentUser.id, newNote)
         .then(() => {
-          showToast('Jurnal tersimpan di Supabase!');
+          showToast('Jurnal tersimpan di cloud!');
         })
         .catch((err: any) => {
-          console.warn('Gagal simpan jurnal ke Supabase:', err);
+          console.warn('Gagal simpan jurnal ke cloud:', err);
           if (err?.code === 'PGRST205' || err?.message?.includes('PGRST205')) {
-            showToast('Tabel journals belum terdaftar di Supabase. Klik "Migrasi Tabel" untuk mendaftarkannya.');
+            showToast('Tabel journals belum terdaftar di cloud. Klik "Migrasi Tabel" untuk mendaftarkannya.');
           }
         });
     } else {
@@ -1444,7 +1651,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setQuickNotes((prev) => prev.filter((n) => n.id !== id));
     if (currentUser?.id) {
       dbService.deleteJournal(currentUser.id, id)
-        .then(() => showToast('Jurnal dihapus dari Supabase.'))
+        .then(() => showToast('Jurnal dihapus dari cloud.'))
         .catch(console.warn);
     }
   };
@@ -1713,9 +1920,10 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               notes={quickNotes}
               transactions={transactions}
               targets={targets}
+              calendarEvents={calendarEvents}
               onNavigateToTab={handleTabChange}
               theme={theme}
-              placeholder="Cari agenda, kebiasaan, catatan, transaksi, target..."
+              placeholder="Cari agenda, acara, kebiasaan, catatan, transaksi, target..."
             />
           </div>
 
@@ -1789,6 +1997,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                     habits={habits}
                     targets={targets}
                     notes={quickNotes}
+                    calendarEvents={calendarEvents}
                     levelProgress={levelProgress}
                     announcements={announcements}
                     onOpenNewEntry={(type) => {
@@ -1895,6 +2104,22 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             </Suspense>
           )}
 
+          {activeTab === 'calendar' && (
+            <Suspense fallback={<PageTransitionSkeleton tab={activeTab} theme={theme} />}>
+              <EventCalendarView
+                events={calendarEvents}
+                isLoading={isLoadingFromSupabase}
+                tableMissing={isCalendarTableMissing}
+                onSaveEvent={handleSaveCalendarEvent}
+                onDeleteEvent={handleDeleteCalendarEvent}
+                onToggleComplete={handleToggleCalendarEvent}
+                onRefresh={handleRefreshCalendarEvents}
+                onShowToast={showToast}
+                theme={theme}
+              />
+            </Suspense>
+          )}
+
           {activeTab === 'habits' && (
             <Suspense fallback={<PageTransitionSkeleton tab={activeTab} theme={theme} />}>
               <HabitsView
@@ -1989,10 +2214,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               <ProfileView
                 userProfile={userProfile}
                 onUpdateProfile={(updatedProfile) => {
-                  setUserProfile(updatedProfile);
-                  if (currentUser?.id) {
-                    dbService.syncProfile(currentUser.id, updatedProfile).catch(console.warn);
-                  }
+                  void handlePersistProfileAndFeedback(updatedProfile);
                 }}
                 currentUser={currentUser}
                 totalBalance={totalBalance}
@@ -2154,12 +2376,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             userProfile={userProfile}
-            onUpdateProfile={(updatedProfile) => {
-              setUserProfile(updatedProfile);
-              if (currentUser?.id) {
-                dbService.syncProfile(currentUser.id, updatedProfile).catch(console.warn);
-              }
-            }}
+            onUpdateProfile={handlePersistProfileAndFeedback}
             currentUser={currentUser}
             onLogout={onLogout}
             onShowToast={showToast}
@@ -2191,24 +2408,19 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               accountCreatedAt={userProfile.accountCreatedAt || localStorage.getItem('ascend_account_created_at') || currentUser?.created_at}
               onShowToast={showToast}
               theme={theme}
-              onSaveFeedback={(newFeedback) => {
+              onSaveFeedback={async (newFeedback) => {
                 const updatedProfile = {
                   ...userProfile,
                   feedback: newFeedback,
                 };
-                setUserProfile(updatedProfile);
                 try {
                   localStorage.setItem('ascend_feedback_24h_shown', 'true');
                   if (currentUser?.id) {
                     localStorage.setItem(`ascend_feedback_24h_shown_${currentUser.id}`, 'true');
                   }
                   sessionStorage.setItem('journalstream_feedback_dismissed', 'true');
-                  localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
-                  localStorage.setItem('journalstream_app_feedback', JSON.stringify(newFeedback));
                 } catch {}
-                if (currentUser?.id) {
-                  dbService.syncProfile(currentUser.id, updatedProfile).catch(console.warn);
-                }
+                return handlePersistProfileAndFeedback(updatedProfile);
               }}
             />
           </Suspense>
@@ -2304,7 +2516,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             totalBalance={totalBalance}
             onResetMonthData={handleCloseMonthAndReset}
             onArchiveCompleted={(report) => {
-              showToast(`Laporan ${report.monthName} berhasil diarsipkan ke Supabase Storage!`);
+              showToast(`Laporan ${report.monthName} berhasil diarsipkan ke penyimpanan cloud!`);
             }}
             theme={theme}
           />
@@ -2329,6 +2541,29 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
 
       {/* Prompt Permintaan Izin Notifikasi Perangkat Resmi Browser */}
       <DeviceNotificationPermissionPrompt isLight={theme === 'light'} />
+
+      {/* Product Tour / Coach Marks 3 Langkah untuk Navigasi Bawah Beranda */}
+      <HomeOnboardingTour
+        isActive={
+          activeTab === 'dashboard' &&
+          !isInitialEntryLoading &&
+          !isLoadingFromSupabase &&
+          !isTabTransitioning &&
+          !isNewEntryOpen &&
+          !isSettingsOpen &&
+          !isProfileModalOpen &&
+          !isFeedbackModalOpen &&
+          !isSyncModalOpen &&
+          !isInstallModalOpen &&
+          !isHelpOpen &&
+          !isResetModalOpen &&
+          !isCloseMonthModalOpen &&
+          !isRoadmapModalOpen &&
+          !isSupabaseModalOpen &&
+          !isAnnouncementsAdminOpen
+        }
+        theme={theme}
+      />
     </div>
   );
 };

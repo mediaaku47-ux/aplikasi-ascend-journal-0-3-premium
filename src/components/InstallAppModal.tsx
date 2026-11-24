@@ -56,7 +56,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
         {/* Header */}
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <AppLogo size="md" />
+            <AppLogo size="md" theme="dark" />
             <div>
               <h3 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                 <span>Pasang Aplikasi</span>

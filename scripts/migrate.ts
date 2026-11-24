@@ -68,7 +68,7 @@ export async function runSupabaseMigration(customConnOrPassword?: string): Promi
     console.log('Skrip pendaftaran tabel & RLS berhasil dieksekusi!');
 
     // Verifikasi tabel
-    const requiredTables = ['user_profiles', 'journals', 'agendas', 'wallets', 'targets', 'habits'];
+    const requiredTables = ['user_profiles', 'journals', 'agendas', 'wallets', 'targets', 'habits', 'calendar_events', 'user_feedbacks'];
     const tablesStatus: Record<string, boolean> = {};
 
     for (const table of requiredTables) {

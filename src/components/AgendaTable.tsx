@@ -3,18 +3,16 @@ import {
   Check, 
   X, 
   Flag, 
-  Plus, 
   Trash2,
-  Calendar,
   CheckSquare,
   LayoutGrid,
   ChevronLeft,
   ChevronRight,
-  CheckCircle2,
   Lock,
   Save,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Search
 } from 'lucide-react';
 import { Task, TaskDayStatus } from '../types';
 import { getDayInfo } from '../utils/dateUtils';
@@ -30,18 +28,29 @@ interface AgendaTableProps {
   totalDaysInMonth?: number;
   onShowToast?: (msg: string) => void;
   theme?: 'dark' | 'light';
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
+  filterType?: 'all' | 'flagged';
+  onFilterTypeChange?: (filter: 'all' | 'flagged') => void;
+  totalTasksCount?: number;
+  flaggedTasksCount?: number;
 }
 
 export const AgendaTable: React.FC<AgendaTableProps> = ({
   tasks,
   onUpdateTasks,
-  onAddTask,
   monthName,
   monthIndex = 2,
   year = 2026,
   totalDaysInMonth = 31,
   onShowToast,
   theme = 'dark',
+  searchQuery = '',
+  onSearchChange,
+  filterType = 'all',
+  onFilterTypeChange,
+  totalTasksCount,
+  flaggedTasksCount,
 }) => {
   const isLight = theme === 'light';
   const today = new Date();
@@ -65,9 +74,6 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
     return 'daily';
   });
 
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskFlagged, setNewTaskFlagged] = useState(false);
-  const [isAddingTask, setIsAddingTask] = useState(false);
   const [activeDayHover, setActiveDayHover] = useState<number | null>(null);
 
   // Draft/pending checkmarks sebelum tombol "Simpan" diklik
@@ -117,20 +123,6 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
     });
     return count;
   }, [pendingDays]);
-
-  const pendingForSelectedDayCount = useMemo(() => {
-    let count = 0;
-    tasks.forEach((t) => {
-      if (!isDayLocked(t, selectedDay) && isDayPending(t.id, selectedDay)) {
-        count++;
-      }
-    });
-    return count;
-  }, [tasks, pendingDays, selectedDay]);
-
-  const hasUnlockedTasksOnSelectedDay = useMemo(() => {
-    return tasks.some((t) => !isDayLocked(t, selectedDay));
-  }, [tasks, selectedDay]);
 
   // Helper update pendingDays secara aman
   const setPendingStatus = (taskId: string, day: number, status: TaskDayStatus) => {
@@ -194,49 +186,6 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
   const handleCellContextMenu = (e: React.MouseEvent, taskId: string, day: number) => {
     e.preventDefault();
     handleToggleMissed(taskId, day);
-  };
-
-  // Mark all unlocked tasks done for selectedDay (masuk ke draft pending)
-  const handleMarkAllDoneForDay = (day: number) => {
-    const unlockedTasks = tasks.filter((t) => !isDayLocked(t, day));
-    if (unlockedTasks.length === 0) {
-      onShowToast?.('Semua agenda pada tanggal ini sudah tersimpan & terkunci.');
-      return;
-    }
-
-    setSaveError(null);
-    setSaveSuccessMsg(null);
-    setPendingDays((prev) => {
-      const next = { ...prev };
-      unlockedTasks.forEach((t) => {
-        next[t.id] = {
-          ...(next[t.id] || {}),
-          [day]: 'done',
-        };
-      });
-      return next;
-    });
-    triggerConfetti({
-      particleCount: 30,
-      spread: 55,
-      origin: { y: 0.6 },
-      colors: ['#10b981', '#34d399', '#f59e0b'],
-    });
-  };
-
-  // Reset hanya draft pending untuk selectedDay (tidak menyentuh data yang sudah tersimpan)
-  const handleResetDay = (day: number) => {
-    setPendingDays((prev) => {
-      const next: Record<string, Record<number, TaskDayStatus>> = {};
-      Object.entries(prev).forEach(([tId, dayMap]) => {
-        const copyMap = { ...dayMap };
-        delete copyMap[day];
-        if (Object.keys(copyMap).length > 0) {
-          next[tId] = copyMap;
-        }
-      });
-      return next;
-    });
   };
 
   // Simpan seluruh ceklis pending ke database dan kunci permanen
@@ -315,37 +264,6 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
     return 'bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold shadow-xs';
   };
 
-  // Add new task directly to Supabase
-  const handleAddTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newTaskTitle.trim();
-    if (!trimmed || isAddingTask) return;
-    const prevFlagged = newTaskFlagged;
-    const uniqueSuffix = Math.random().toString(36).slice(2, 7);
-    const newTask: Task = {
-      id: `task-${Date.now()}-${uniqueSuffix}`,
-      title: trimmed,
-      flagged: prevFlagged,
-      days: {},
-      createdAt: new Date().toISOString(),
-    };
-    setIsAddingTask(true);
-    try {
-      if (onAddTask) {
-        await onAddTask(newTask);
-      } else {
-        await onUpdateTasks([...tasks, newTask]);
-        onShowToast?.('Agenda baru berhasil ditambahkan ke Supabase!');
-      }
-      setNewTaskTitle('');
-      setNewTaskFlagged(false);
-    } catch (err: any) {
-      onShowToast?.(err?.message || 'Gagal menambahkan agenda ke database Supabase.');
-    } finally {
-      setIsAddingTask(false);
-    }
-  };
-
   // Delete task (dilindungi jika sudah memiliki riwayat ceklis tersimpan di database)
   const handleDeleteTask = async (taskId: string) => {
     const target = tasks.find((t) => t.id === taskId);
@@ -392,66 +310,6 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
         isLight ? 'text-slate-900' : 'text-white'
       } relative transition-all duration-300`}
     >
-
-      {/* Header with View Switcher */}
-      <div className={`flex justify-between items-start md:items-center mb-4 border-b pb-4 flex-col sm:flex-row gap-3 relative z-10 ${
-        isLight ? 'border-slate-200' : 'border-white/10'
-      }`}>
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className={`text-lg font-black tracking-tight flex items-center gap-2 ${isLight ? 'text-slate-950' : 'text-white'}`}>
-              <span>Agenda Harian</span>
-            </h3>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-              isLight 
-                ? 'bg-teal-100 text-teal-800 border-teal-300' 
-                : 'bg-sky-500/20 text-sky-300 border-sky-500/30'
-            }`}>
-              {tasks.length} Agenda
-            </span>
-          </div>
-          <p className={`text-xs font-semibold mt-0.5 flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-white/50'}`}>
-            <Calendar className={`w-3.5 h-3.5 ${isLight ? 'text-teal-600' : 'text-sky-400'}`} />
-            <span>{monthName} {year}</span>
-          </p>
-        </div>
-
-        {/* View Mode Toggle & Reset Button */}
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-          {/* View Mode Selector: Daily Touch vs 31-Day Matrix */}
-          <div className={`flex items-center p-1 rounded-xl border ${
-            isLight ? 'bg-slate-100 border-slate-200' : 'bg-white/5 border-white/10'
-          }`}>
-            <button
-              type="button"
-              onClick={() => setViewMode('daily')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'daily'
-                  ? isLight ? 'bg-[#003B2F] text-white shadow-xs' : 'bg-teal-600 text-white shadow-xs'
-                  : isLight ? 'text-slate-700 hover:text-slate-950' : 'text-white/60 hover:text-white'
-              }`}
-              title="Tampilan Ceklis Harian Mobile (Besar & Mudah Ditekan)"
-            >
-              <CheckSquare className="w-3.5 h-3.5" />
-              <span>Ceklis Harian</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('matrix')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'matrix'
-                  ? isLight ? 'bg-[#003B2F] text-white shadow-xs' : 'bg-teal-600 text-white shadow-xs'
-                  : isLight ? 'text-slate-700 hover:text-slate-950' : 'text-white/60 hover:text-white'
-              }`}
-              title="Tampilan Matriks Tabel 31 Hari Lengkap"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Matriks 31 Hari</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* ========================================================================= */}
       {/* MODE 1: CEKLIS HARIAN (MOBILE TOUCH-OPTIMIZED - NO OVERLAPPING COLUMNS) */}
       {/* ========================================================================= */}
@@ -555,113 +413,112 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
               </div>
             </div>
 
-            {/* Daily Progress Bar & Batch Actions */}
-            <div className="space-y-1.5 pt-1">
-              <div className={`w-full h-2 rounded-full overflow-hidden p-0.5 ${isLight ? 'bg-slate-200' : 'bg-white/10'}`}>
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-teal-500 via-emerald-500 to-teal-400 transition-all duration-300 shadow-sm"
-                  style={{ width: `${dayPercent}%` }}
-                />
-              </div>
+            {/* Pengalih Tampilan: Ceklis Harian vs Matriks 31 Hari */}
+            <div
+              className={`grid grid-cols-2 gap-1 p-1 rounded-xl border ${
+                isLight ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setViewMode('daily')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  isLight ? 'bg-[#003B2F] text-white shadow-xs' : 'bg-teal-600 text-white shadow-xs'
+                }`}
+                title="Tampilan Ceklis Harian Mobile (Besar & Mudah Ditekan)"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>Ceklis Harian</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('matrix')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  isLight ? 'text-slate-700 hover:text-slate-950' : 'text-white/60 hover:text-white'
+                }`}
+                title="Tampilan Matriks Tabel 31 Hari Lengkap"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Matriks 31 Hari</span>
+              </button>
+            </div>
 
-              <div className={`flex items-center justify-between text-[11px] pt-1 font-semibold ${isLight ? 'text-slate-600' : 'text-white/50'}`}>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!hasUnlockedTasksOnSelectedDay}
-                    onClick={() => handleMarkAllDoneForDay(selectedDay)}
-                    className={`${isLight ? 'text-emerald-700 hover:text-emerald-900' : 'text-emerald-400 hover:text-emerald-300'} disabled:opacity-40 disabled:cursor-not-allowed font-bold flex items-center gap-1 transition-colors cursor-pointer`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Ceklis Semua Hari Ini</span>
-                  </button>
-                  {pendingForSelectedDayCount > 0 && (
-                    <>
-                      <span className={isLight ? 'text-slate-300' : 'text-white/20'}>•</span>
-                      <button
-                        type="button"
-                        onClick={() => handleResetDay(selectedDay)}
-                        className={`${isLight ? 'text-slate-500 hover:text-slate-800' : 'text-white/40 hover:text-white'} transition-colors cursor-pointer`}
-                      >
-                        Batal Draft
-                      </button>
-                    </>
+            {/* Pencarian & Filter Terintegrasi di Dalam Kartu Navigasi Hari */}
+            {onSearchChange && (
+              <div
+                className={`pt-2.5 border-t flex flex-col sm:flex-row gap-2 ${
+                  isLight ? 'border-slate-200/80' : 'border-white/10'
+                }`}
+              >
+                <div className="relative flex-1">
+                  <Search
+                    className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${
+                      isLight ? 'text-slate-400' : 'text-white/40'
+                    }`}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Cari agenda atau tugas..."
+                    value={searchQuery}
+                    onChange={(e) => onSearchChange(e.target.value)}
+                    className={`w-full pl-8 pr-8 py-2 text-xs rounded-xl outline-hidden transition-all font-medium ${
+                      isLight
+                        ? 'bg-white border border-slate-200 focus:border-teal-500 text-slate-900 placeholder-slate-400'
+                        : 'bg-white/5 border border-white/10 focus:border-teal-400 text-white placeholder-white/35'
+                    }`}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => onSearchChange('')}
+                      aria-label="Hapus pencarian"
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg cursor-pointer ${
+                        isLight ? 'text-slate-400 hover:text-slate-700' : 'text-white/40 hover:text-white'
+                      }`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
 
-                {isCurrentMonthActive && selectedDay !== currentRealDay && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDay(currentRealDay)}
-                    className={`${isLight ? 'text-teal-700 hover:text-teal-900' : 'text-sky-400 hover:text-sky-300'} font-bold cursor-pointer`}
-                  >
-                    Kembali ke Hari Ini
-                  </button>
+                {onFilterTypeChange && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => onFilterTypeChange('all')}
+                      className={`flex-1 sm:flex-initial px-3 py-2 text-[11px] font-bold rounded-xl transition-all cursor-pointer ${
+                        filterType === 'all'
+                          ? isLight
+                            ? 'bg-[#003B2F] text-white shadow-xs'
+                            : 'bg-teal-600 text-white shadow-xs'
+                          : isLight
+                          ? 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                          : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10 border border-white/10'
+                      }`}
+                    >
+                      Semua ({totalTasksCount ?? tasks.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onFilterTypeChange('flagged')}
+                      className={`flex-1 sm:flex-initial px-3 py-2 text-[11px] font-bold rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        filterType === 'flagged'
+                          ? isLight
+                            ? 'bg-rose-100 border border-rose-400 text-rose-800'
+                            : 'bg-rose-500/30 border border-rose-500/50 text-rose-200'
+                          : isLight
+                          ? 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                          : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10 border border-white/10'
+                      }`}
+                    >
+                      <Flag className="w-3 h-3" />
+                      <span>Prioritas ({flaggedTasksCount ?? tasks.filter((t) => t.flagged).length})</span>
+                    </button>
+                  </div>
                 )}
               </div>
-            </div>
+            )}
           </div>
-
-          {/* Quick Input Bar khusus di bagian atas agar mengisi agenda harian sangat mudah & cepat */}
-          <form
-            onSubmit={handleAddTask}
-            className={`flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 sm:p-2.5 rounded-2xl border shadow-sm mb-3 min-w-0 max-w-full overflow-hidden ${
-              isLight 
-                ? 'bg-slate-50 border-slate-300' 
-                : 'bg-white/[0.04] border-sky-500/30'
-            }`}
-          >
-            <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center shrink-0 ${
-              isLight ? 'bg-teal-100 text-teal-800' : 'bg-sky-500/20 text-sky-400'
-            }`}>
-              <Plus className="w-4 h-4" />
-            </div>
-            <input
-              id="quick-add-daily-task"
-              type="text"
-              value={newTaskTitle}
-              onChange={(e) => setNewTaskTitle(e.target.value)}
-              placeholder={`Tambah agenda tgl ${selectedDay} ${monthName}...`}
-              className={`flex-1 min-w-[140px] bg-transparent border-none outline-hidden focus:ring-0 text-xs sm:text-sm py-1 font-semibold ${
-                isLight ? 'text-slate-900 placeholder-slate-400' : 'text-white placeholder-white/40'
-              }`}
-            />
-            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-              <button
-                type="button"
-                onClick={() => setNewTaskFlagged(!newTaskFlagged)}
-                className={`p-1.5 sm:p-2 rounded-xl transition-colors text-xs flex items-center gap-1 cursor-pointer border shrink-0 ${
-                  newTaskFlagged
-                    ? isLight
-                      ? 'bg-rose-100 border-rose-300 text-rose-800 font-bold'
-                      : 'bg-rose-500/20 border-rose-500/40 text-rose-300 font-semibold'
-                    : isLight
-                    ? 'border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-                    : 'border-white/10 text-white/40 hover:text-white hover:bg-white/5'
-                }`}
-                title="Tandai prioritas penting"
-              >
-                <Flag className={`w-3.5 h-3.5 ${newTaskFlagged ? 'fill-rose-500 text-rose-500' : ''}`} />
-                <span className="text-[10px] hidden sm:inline">{newTaskFlagged ? 'Prioritas' : ''}</span>
-              </button>
-              <button
-                type="submit"
-                disabled={!newTaskTitle.trim() || isAddingTask}
-                className={`text-xs ${
-                  isLight ? 'bg-[#003B2F] hover:bg-[#002e24]' : 'bg-teal-600 hover:bg-teal-700'
-                } disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl transition-all font-bold cursor-pointer shadow-sm shrink-0 active:scale-95 whitespace-nowrap flex items-center gap-1.5`}
-              >
-                {isAddingTask ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Menyimpan...</span>
-                  </>
-                ) : (
-                  <span>Tambah</span>
-                )}
-              </button>
-            </div>
-          </form>
 
           {/* List of Tasks for Selected Day (Full-width cards with large, accessible checkboxes) */}
           <div className="space-y-2.5">
@@ -669,7 +526,9 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
               <div className={`p-8 rounded-2xl border text-center text-xs font-semibold ${
                 isLight ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-white/[0.02] border-white/5 text-white/40'
               }`}>
-                Belum ada agenda bulan ini. Tambahkan tugas agenda baru dengan form di atas!
+                {searchQuery.trim() || filterType === 'flagged'
+                  ? 'Tidak ada agenda yang cocok dengan pencarian atau filter ini.'
+                  : 'Belum ada agenda bulan ini. Tekan tombol Tambah Agenda Baru di atas!'}
               </div>
             ) : (
               tasks.map((task) => {
@@ -859,6 +718,35 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
       {/* ========================================================================= */}
       {viewMode === 'matrix' && (
         <div className="relative z-10 space-y-2">
+          {/* Pengalih Tampilan di Mode Matriks */}
+          <div className="flex justify-end">
+            <div className={`flex items-center p-1 rounded-xl border ${
+              isLight ? 'bg-slate-100 border-slate-200' : 'bg-white/5 border-white/10'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setViewMode('daily')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isLight ? 'text-slate-700 hover:text-slate-950' : 'text-white/60 hover:text-white'
+                }`}
+                title="Tampilan Ceklis Harian Mobile (Besar & Mudah Ditekan)"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>Ceklis Harian</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('matrix')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isLight ? 'bg-[#003B2F] text-white shadow-xs' : 'bg-teal-600 text-white shadow-xs'
+                }`}
+                title="Tampilan Matriks Tabel 31 Hari Lengkap"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Matriks 31 Hari</span>
+              </button>
+            </div>
+          </div>
           {/* Scroll instruction hint on mobile */}
           <div className={`md:hidden flex items-center justify-between text-[11px] px-3 py-1.5 rounded-xl border font-bold ${
             isLight 

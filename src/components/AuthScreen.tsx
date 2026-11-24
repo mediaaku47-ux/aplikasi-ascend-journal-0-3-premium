@@ -14,16 +14,24 @@ import {
   Mail,
   Lock,
   ArrowLeft,
-  Leaf
+  Leaf,
+  Sparkles
 } from 'lucide-react';
 import { authService, getReadableAuthError, dbService } from '../lib/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { UserProfile } from '../types';
 import { SecurityAuditModal } from './SecurityAuditModal';
+import { AppLogo } from './AppLogo';
+
+const LOGIN_COACH_MARK_STORAGE_KEY = 'ascend_login_new_user_coach_mark_dismissed';
 
 interface AuthScreenProps {
-  onAuthSuccess: (user: SupabaseUser, initialProfile?: UserProfile) => void;
+  onAuthSuccess: (
+    user: SupabaseUser,
+    initialProfile?: UserProfile,
+    meta?: { isNewUser?: boolean }
+  ) => void;
   showToast: (msg: string) => void;
   initialMode?: 'welcome' | 'login' | 'register';
   onContinueAsGuest?: () => void;
@@ -60,6 +68,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [forgotSuccess, setForgotSuccess] = useState(false);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [isConfigured, setIsConfigured] = useState<boolean>(() => isSupabaseConfigured());
+  const [showRegisterCoachMark, setShowRegisterCoachMark] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LOGIN_COACH_MARK_STORAGE_KEY) !== 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const dismissRegisterCoachMark = () => {
+    setShowRegisterCoachMark(false);
+    try {
+      localStorage.setItem(LOGIN_COACH_MARK_STORAGE_KEY, 'true');
+    } catch {
+      // Ignore storage errors in restricted environments
+    }
+  };
 
   useEffect(() => {
     setIsConfigured(isSupabaseConfigured());
@@ -133,7 +157,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             res.user.email, 
             res.user.user_metadata?.full_name
           );
-          onAuthSuccess(res.user, profile);
+          onAuthSuccess(res.user, profile, { isNewUser: false });
         } else {
           setErrorMessage('Gagal memverifikasi akun. Silakan periksa kembali email dan kata sandi Anda.');
         }
@@ -156,7 +180,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
           if (res.session) {
             showToast(`Akun berhasil dibuat! Selamat datang, ${fullName || res.user.email}.`);
-            onAuthSuccess(res.user, profile);
+            onAuthSuccess(res.user, profile, { isNewUser: true });
           } else {
             setSuccessMessage('Pendaftaran berhasil! Silakan masuk dengan email dan kata sandi Anda.');
             showToast('Pendaftaran akun berhasil! Silakan masuk.');
@@ -210,7 +234,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         aud: 'authenticated',
         created_at: guestCreatedAt,
       } as SupabaseUser;
-      onAuthSuccess(guestUser);
+      onAuthSuccess(guestUser, undefined, { isNewUser: true });
     }
   };
 
@@ -272,18 +296,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* Center Hero Content (Aesthetic & Minimalist per user reference) */}
             <main className="relative z-20 w-full max-w-xl mx-auto px-6 py-8 flex-1 flex flex-col items-center justify-center text-center">
-              {/* App Emblem Icon with Smooth Rounded Corners */}
+              {/* App Emblem Icon (Inline SVG Logo) */}
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.5, delay: 0.1 }}
-                className="w-20 h-20 sm:w-24 sm:h-24 rounded-[26px] sm:rounded-[30px] p-1.5 bg-gradient-to-tr from-[#054D3D] via-[#023E30] to-[#0D6853] border border-emerald-400/40 shadow-[0_16px_45px_rgba(0,0,0,0.5),0_0_30px_rgba(45,212,191,0.25)] flex items-center justify-center mb-6 overflow-hidden"
+                className="w-24 h-24 sm:w-28 sm:h-28 rounded-[28px] sm:rounded-[32px] p-3 bg-gradient-to-tr from-[#04362A]/90 via-[#022A21]/90 to-[#084D3D]/90 border border-emerald-400/35 shadow-[0_16px_45px_rgba(0,0,0,0.45),0_0_30px_rgba(45,212,191,0.2)] flex items-center justify-center mb-6 backdrop-blur-sm"
               >
-                <img
-                  src="/logo.png"
-                  alt="Ascend Emblem"
-                  className="w-full h-full object-cover rounded-[20px] sm:rounded-[24px] overflow-hidden filter brightness-105"
-                />
+                <AppLogo size="2xl" theme="dark" />
               </motion.div>
 
               {/* Aesthetic Title with Playfair Serif Feeling */}
@@ -360,8 +380,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
 
               <div className="max-w-md mx-auto w-full relative z-10">
-                {/* Back button to Welcome Screen */}
-                <div className="flex items-center justify-start mb-4">
+                {/* Back button */}
+                <div className="flex items-center justify-between gap-3 mb-4">
                   <button
                     type="button"
                     onClick={() => {
@@ -603,22 +623,92 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </button>
                 </form>
 
-                {/* Dedicated Switcher Button for the Div */}
-                <div className="pt-3">
-                  <button
-                    type="button"
-                    id="btn-switch-auth-mode"
-                    onClick={() => {
-                      setMode(mode === 'login' ? 'register' : 'login');
-                      setAgreedToTerms(false);
-                      setErrorMessage(null);
-                      setSuccessMessage(null);
-                    }}
-                    className="w-full py-3 px-5 rounded-2xl border border-slate-200/90 hover:border-[#003B2F]/40 bg-slate-50/90 hover:bg-slate-100/90 text-slate-700 hover:text-[#003B2F] font-semibold text-xs sm:text-sm tracking-wide transition-all cursor-pointer flex items-center justify-center gap-2 select-none shadow-xs active:scale-[0.99]"
-                  >
-                    <span className="font-['Plus_Jakarta_Sans',sans-serif] font-semibold tracking-tight">{mode === 'login' ? 'Belum punya akun? Buat Akun Baru' : 'Sudah punya akun? Masuk ke Akun'}</span>
-                    <span className="font-bold">→</span>
-                  </button>
+                {/* Dedicated Switcher Button with Onboarding Coach Mark for New Users */}
+                <div className="pt-3 relative">
+                  <div className="relative">
+                    {mode === 'login' && showRegisterCoachMark && (
+                      <motion.span
+                        aria-hidden="true"
+                        initial={{ opacity: 0.45, scale: 0.99 }}
+                        animate={{
+                          opacity: [0.35, 0.7, 0.35],
+                          scale: [1, 1.02, 1],
+                        }}
+                        transition={{
+                          duration: 2.2,
+                          repeat: Infinity,
+                          ease: 'easeInOut',
+                        }}
+                        className="pointer-events-none absolute -inset-1 rounded-[18px] bg-[#26A69A]/25 blur-[2px]"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      id="btn-switch-auth-mode"
+                      onClick={() => {
+                        if (mode === 'login' && showRegisterCoachMark) {
+                          dismissRegisterCoachMark();
+                        }
+                        setMode(mode === 'login' ? 'register' : 'login');
+                        setAgreedToTerms(false);
+                        setErrorMessage(null);
+                        setSuccessMessage(null);
+                      }}
+                      className={`relative z-10 w-full py-3 px-5 rounded-2xl border font-semibold text-xs sm:text-sm tracking-wide transition-all cursor-pointer flex items-center justify-center gap-2 select-none active:scale-[0.99] ${
+                        mode === 'login' && showRegisterCoachMark
+                          ? 'border-[#26A69A] bg-[#ECF7F4] hover:bg-[#E0F2EE] text-[#003B2F] ring-2 ring-[#26A69A]/40 shadow-[0_0_22px_rgba(38,166,154,0.28)]'
+                          : 'border-slate-200/90 hover:border-[#003B2F]/40 bg-slate-50/90 hover:bg-slate-100/90 text-slate-700 hover:text-[#003B2F] shadow-xs'
+                      }`}
+                    >
+                      <span className="font-['Plus_Jakarta_Sans',sans-serif] font-semibold tracking-tight">
+                        {mode === 'login' ? 'Belum punya akun? Buat Akun Baru' : 'Sudah punya akun? Masuk ke Akun'}
+                      </span>
+                      <span className="font-bold">→</span>
+                    </button>
+                  </div>
+
+                  <AnimatePresence>
+                    {mode === 'login' && showRegisterCoachMark && (
+                      <motion.div
+                        id="register-coach-mark-tooltip"
+                        role="status"
+                        aria-live="polite"
+                        initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                        transition={{ duration: 0.24, ease: 'easeOut' }}
+                        className="relative mt-3 z-20"
+                      >
+                        {/* Upward Arrow Pointer directing straight to "Belum punya akun? Buat Akun Baru" */}
+                        <div
+                          aria-hidden="true"
+                          className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-[#04362A] border-t border-l border-[#26A69A]/55"
+                        />
+                        <div className="relative rounded-2xl bg-gradient-to-br from-[#04362A] to-[#00221A] text-white border border-[#26A69A]/45 p-3.5 sm:p-4 shadow-[0_14px_34px_rgba(0,43,32,0.34)]">
+                          <div className="flex items-start gap-2.5">
+                            <span className="mt-0.5 w-6 h-6 rounded-lg bg-[#26A69A]/20 border border-[#26A69A]/40 text-[#5EEAD4] flex items-center justify-center shrink-0">
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs sm:text-[12.5px] leading-relaxed text-emerald-50/95 font-['Plus_Jakarta_Sans',sans-serif]">
+                                Baru pertama kali di sini? Ketuk tombol ini untuk mendaftar dan mulai mengatur jurnalmu.
+                              </p>
+                              <div className="mt-2.5 flex justify-end">
+                                <button
+                                  type="button"
+                                  id="btn-dismiss-register-coachmark"
+                                  onClick={dismissRegisterCoachMark}
+                                  className="px-3.5 py-1.5 rounded-lg bg-[#26A69A] hover:bg-[#2DD4BF] active:scale-[0.97] text-[#00221A] font-bold text-[11.5px] tracking-wide transition-all cursor-pointer shadow-xs font-['Plus_Jakarta_Sans',sans-serif]"
+                                >
+                                  Mengerti
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
             </div>

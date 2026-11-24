@@ -482,7 +482,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <AppLogo size="lg" />
+                <AppLogo size="lg" theme={theme} />
                 <div>
                   <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
                     Ascend Journal PWA

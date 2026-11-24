@@ -8,13 +8,15 @@ import {
   StickyNote, 
   Target, 
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  CalendarDays
 } from 'lucide-react';
-import { NavTab, Task, Habit, QuickNote, Transaction, TargetItem } from '../types';
+import { NavTab, Task, Habit, QuickNote, Transaction, TargetItem, CalendarEvent } from '../types';
+import { parseCalendarCategory } from '../lib/calendarCategories';
 
 export interface GlobalSearchResultItem {
   id: string;
-  type: 'agenda' | 'habits' | 'notes' | 'finance' | 'targets' | 'feature';
+  type: 'agenda' | 'calendar' | 'habits' | 'notes' | 'finance' | 'targets' | 'feature';
   title: string;
   subtitle: string;
   tab: NavTab;
@@ -28,11 +30,13 @@ interface GlobalSearchBarProps {
   notes?: QuickNote[];
   transactions?: Transaction[];
   targets?: TargetItem[];
+  calendarEvents?: CalendarEvent[];
   onNavigateToTab: (tab: NavTab) => void;
   theme?: 'dark' | 'light';
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  id?: string;
 }
 
 export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
@@ -41,11 +45,13 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
   notes = [],
   transactions = [],
   targets = [],
+  calendarEvents = [],
   onNavigateToTab,
   theme = 'light',
-  placeholder = 'Cari agenda, kebiasaan, catatan, transaksi, target...',
+  placeholder = 'Cari agenda, acara, kebiasaan, catatan, transaksi, target...',
   className = '',
   autoFocus = false,
+  id,
 }) => {
   const isLight = theme === 'light';
   const [query, setQuery] = useState('');
@@ -89,6 +95,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
   const appFeatures: Array<{ name: string; tab: NavTab; desc: string }> = [
     { name: 'Dasbor Awal', tab: 'dashboard', desc: 'Ringkasan produktivitas harian' },
     { name: 'Agenda Harian', tab: 'agenda', desc: 'Daftar rencana & checklist tugas' },
+    { name: 'Kalender Acara', tab: 'calendar', desc: 'Jadwal webinar, deadline & agenda bulanan' },
     { name: 'Pelacak Kebiasaan', tab: 'habits', desc: 'Konsistensi & rutinitas harian' },
     { name: 'Keuangan & Kas', tab: 'finance', desc: 'Pencatatan kas masuk & keluar' },
     { name: 'Perkembangan', tab: 'progress', desc: 'Statistik, grafik XP, & level diri' },
@@ -218,8 +225,30 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
       }
     });
 
+    // 7. Calendar Events
+    calendarEvents.forEach((ev) => {
+      const parsedCat = parseCalendarCategory(ev.category);
+      const displayCategory = parsedCat.label || parsedCat.color.name;
+      const matchTitle = ev.title.toLowerCase().includes(q);
+      const matchCategory = displayCategory.toLowerCase().includes(q);
+      const matchDesc = (ev.description || '').toLowerCase().includes(q);
+      if (matchTitle || matchCategory || matchDesc) {
+        items.push({
+          id: `cal-${ev.id}`,
+          type: 'calendar',
+          title: ev.title,
+          subtitle: `${ev.date}${ev.time ? ` • ${ev.time}` : ''} • ${displayCategory}`,
+          tab: 'calendar',
+          badge: 'Kalender',
+          badgeColor: isLight
+            ? 'bg-sky-50 text-sky-700 border-sky-200'
+            : 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+        });
+      }
+    });
+
     return items;
-  }, [query, tasks, habits, notes, transactions, targets, isLight]);
+  }, [query, tasks, habits, notes, transactions, targets, calendarEvents, isLight]);
 
   const handleSelectResult = (tab: NavTab) => {
     onNavigateToTab(tab);
@@ -234,6 +263,8 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
         return <Sparkles className="w-4 h-4 text-teal-400 shrink-0" />;
       case 'agenda':
         return <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />;
+      case 'calendar':
+        return <CalendarDays className="w-4 h-4 text-sky-400 shrink-0" />;
       case 'habits':
         return <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />;
       case 'notes':
@@ -251,6 +282,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
     <div ref={containerRef} className={`relative ${className}`}>
       {/* Search Input Bar */}
       <div 
+        id={id}
         className={`w-full flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4.5 py-2.5 sm:py-2.5 rounded-full border transition-all duration-200 ${
           isLight
             ? 'bg-slate-100 hover:bg-slate-100/90 border-slate-300/80 hover:border-teal-400 shadow-xs focus-within:bg-white focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500/20'

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Trash2, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Camera, Trash2, Loader2, CheckCircle2, AlertCircle, X, Eye } from 'lucide-react';
 import { uploadUserAvatar, getAvatarSignedUrl, removeUserAvatar } from '../lib/avatarService';
 
 export interface AvatarUploaderProps {
@@ -32,6 +33,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
 
   const [displayUrl, setDisplayUrl] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Resolusi Signed URL jika `currentAvatarUrl` adalah path relatif di storage
@@ -80,6 +82,18 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
       return () => clearTimeout(timer);
     }
   }, [statusMessage]);
+
+  // Tutup pratinjau foto saat menekan tombol Escape
+  useEffect(() => {
+    if (!isPreviewOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPreviewOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPreviewOpen]);
 
   // Handler pemilihan file gambar dari perangkat
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -192,23 +206,42 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
       {/* Kontainer Avatar Bulat */}
       <div className={`relative group ${sizeMap.wrapper}`}>
         <div
-          className={`w-full h-full rounded-full overflow-hidden border-2 transition-all duration-200 shadow-md flex items-center justify-center ${
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsPreviewOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setIsPreviewOpen(true);
+            }
+          }}
+          aria-label={`Lihat foto profil ${userName}`}
+          title="Klik untuk melihat foto profil"
+          className={`relative w-full h-full rounded-full overflow-hidden border-2 transition-all duration-200 shadow-md flex items-center justify-center cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 ${
             isLight
               ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-500/20'
               : 'border-emerald-400 bg-slate-800 ring-2 ring-emerald-500/30'
           }`}
         >
           {displayUrl ? (
-            <img
-              src={displayUrl}
-              alt={userName}
-              className="w-full h-full object-cover transition-transform group-hover:scale-105"
-              referrerPolicy="no-referrer"
-              onError={() => {
-                // Jika gambar gagal dimuat (misal token kadaluwarsa), fallback ke inisial
-                setDisplayUrl('');
-              }}
-            />
+            <>
+              <img
+                src={displayUrl}
+                alt={userName}
+                className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                referrerPolicy="no-referrer"
+                onError={() => {
+                  // Jika gambar gagal dimuat (misal token kadaluwarsa), fallback ke inisial
+                  setDisplayUrl('');
+                }}
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              >
+                <Eye className="w-5 h-5 text-white drop-shadow" />
+              </div>
+            </>
           ) : (
             <div
               className={`w-full h-full flex items-center justify-center font-bold tracking-tight ${sizeMap.initial} ${
@@ -231,7 +264,10 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
         {showControls && (
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={(e) => {
+              e.stopPropagation();
+              fileInputRef.current?.click();
+            }}
             disabled={isUploading}
             aria-label="Pilih foto profil"
             title="Ganti Foto Profil"
@@ -310,6 +346,70 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
           <span>{statusMessage.text}</span>
         </div>
       )}
+
+      {/* Modal Pratinjau Foto Profil Full-Size */}
+      {isPreviewOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Foto profil ${userName}`}
+            onClick={() => setIsPreviewOpen(false)}
+            className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-md w-full flex flex-col items-center gap-4"
+            >
+              <div className="w-full flex items-center justify-between text-white px-1">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold truncate">{userName}</p>
+                  <p className="text-xs text-slate-300">Foto Profil</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewOpen(false)}
+                  aria-label="Tutup pratinjau foto"
+                  className="min-h-[44px] min-w-[44px] rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {displayUrl ? (
+                <div className="w-full max-w-[340px] aspect-square rounded-3xl overflow-hidden border-2 border-white/15 shadow-2xl bg-slate-900">
+                  <img
+                    src={displayUrl}
+                    alt={userName}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ) : (
+                <div className="w-56 h-56 rounded-full border-4 border-teal-400/50 bg-teal-700 text-white flex flex-col items-center justify-center shadow-2xl">
+                  <span className="text-6xl font-extrabold">{firstLetter}</span>
+                  <span className="text-xs text-teal-100/80 mt-2">Belum ada foto profil</span>
+                </div>
+              )}
+
+              {showControls && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPreviewOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg transition-colors cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>{displayUrl ? 'Ganti Foto Profil' : 'Unggah Foto Profil'}</span>
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

@@ -12,7 +12,7 @@ interface ExperienceFeedbackModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialFeedback?: AppFeedback;
-  onSaveFeedback: (feedback: AppFeedback) => void;
+  onSaveFeedback: (feedback: AppFeedback) => Promise<{ ok?: boolean; error?: string } | void> | { ok?: boolean; error?: string } | void;
   is24HourTrigger?: boolean;
   firstAppOpenAt?: string;
   accountCreatedAt?: string;
@@ -66,6 +66,7 @@ export const ExperienceFeedbackModal: React.FC<ExperienceFeedbackModalProps> = (
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<string>(initialFeedback?.suggestions || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -77,6 +78,7 @@ export const ExperienceFeedbackModal: React.FC<ExperienceFeedbackModalProps> = (
         setSuggestions('');
       }
       setIsSubmitting(false);
+      setSubmitError(null);
     }
   }, [isOpen, initialFeedback]);
 
@@ -89,11 +91,12 @@ export const ExperienceFeedbackModal: React.FC<ExperienceFeedbackModalProps> = (
     setRating(num);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (rating < 1) return;
+    if (rating < 1 || isSubmitting) return;
 
     setIsSubmitting(true);
+    setSubmitError(null);
 
     const newFeedback: AppFeedback = {
       rating,
@@ -103,20 +106,29 @@ export const ExperienceFeedbackModal: React.FC<ExperienceFeedbackModalProps> = (
       updatedAt: new Date().toISOString(),
     };
 
-    triggerConfetti({
-      particleCount: 45,
-      spread: 70,
-      colors: ['#f59e0b', '#38bdf8', '#10b981', '#ec4899'],
-    });
+    try {
+      const result = await onSaveFeedback(newFeedback);
+      if (result && result.ok === false) {
+        setSubmitError(result.error || 'Gagal menyimpan penilaian ke server cloud. Silakan coba lagi.');
+        setIsSubmitting(false);
+        return;
+      }
 
-    setTimeout(() => {
-      onSaveFeedback(newFeedback);
+      triggerConfetti({
+        particleCount: 45,
+        spread: 70,
+        colors: ['#f59e0b', '#38bdf8', '#10b981', '#ec4899'],
+      });
+
       if (onShowToast) {
-        onShowToast('Terima kasih banyak atas bintang dan saran Anda! 🙏');
+        onShowToast('Terima kasih banyak atas bintang dan saran Anda! Tersimpan ke cloud.');
       }
       setIsSubmitting(false);
       onClose();
-    }, 300);
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Gagal menyimpan penilaian ke cloud.');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -241,6 +253,19 @@ export const ExperienceFeedbackModal: React.FC<ExperienceFeedbackModalProps> = (
               }`}
             />
           </div>
+
+          {submitError && (
+            <div
+              role="alert"
+              className={`p-3 rounded-xl border text-xs font-medium ${
+                isLight
+                  ? 'bg-rose-50 border-rose-200 text-rose-800'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}
+            >
+              {submitError}
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div className="pt-1 flex items-center justify-end gap-2.5">

@@ -147,14 +147,19 @@ export const AscendDesktopDashboard: React.FC<AscendDesktopDashboardProps> = ({
                 }`}>
                   Halo,
                 </span>
-                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border shadow-2xs ${
-                  isLight 
-                    ? 'bg-white/90 border-teal-200/90 text-teal-800' 
-                    : 'bg-[#111726]/90 border-slate-700/80 text-teal-300'
-                }`}>
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTab('calendar')}
+                  title="Buka Kalender Jadwal Acara"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border shadow-2xs transition-colors cursor-pointer ${
+                    isLight 
+                      ? 'bg-white/90 border-teal-200/90 text-teal-800 hover:bg-teal-50 hover:border-teal-400' 
+                      : 'bg-[#111726]/90 border-slate-700/80 text-teal-300 hover:bg-[#1a243b] hover:border-teal-400/50'
+                  }`}
+                >
                   <Calendar className="w-3.5 h-3.5 text-teal-500 shrink-0" />
                   <span>{formattedDate}</span>
-                </div>
+                </button>
               </div>
 
               {/* Nama Pengguna */}

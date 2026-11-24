@@ -18,7 +18,6 @@ import {
   Edit3,
   FileText, 
   MessageSquare, 
-  Star, 
   Sliders,
   Check,
   X,
@@ -33,6 +32,7 @@ import { User } from '@supabase/supabase-js';
 import { UserProfile, AppAnnouncement } from '../../types';
 import { dbService, isSupabaseConfigured } from '../../lib/supabaseService';
 import { checkIsAdminUser } from '../../utils/admin';
+import { AdminFeedbackView } from './AdminFeedbackView';
 
 export interface AdminActivityLog {
   id: string;
@@ -91,7 +91,7 @@ const DEFAULT_FEATURE_CONTROLS: AppFeatureControl[] = [
   {
     id: 'feature_cloud_sync',
     name: 'Sinkronisasi Realtime Cloud',
-    description: 'Sinkronisasi data otomatis antara perangkat HP dan Laptop via Supabase',
+    description: 'Sinkronisasi data otomatis antara perangkat HP dan Laptop via Cloud',
     category: 'system',
     isEnabled: true,
   },
@@ -139,7 +139,6 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   // 1. Dashboard State
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(true);
   const [userProfilesList, setUserProfilesList] = useState<any[]>([]);
-  const [feedbacksList, setFeedbacksList] = useState<any[]>([]);
   const [tablesHealth, setTablesHealth] = useState<Record<string, { exists: boolean; label: string; error?: string }>>({});
   const [allTablesOk, setAllTablesOk] = useState<boolean>(true);
   const [systemErrors, setSystemErrors] = useState<string[]>([]);
@@ -288,21 +287,14 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
       if (isSupabaseConfigured()) {
         const client = (await import('../../lib/supabase')).getSupabase();
 
-        // 2. Ambil data feedback, status tabel, dan hitung metrik database asli
-        const [feedbackData, tablesStatus] = await Promise.all([
-          dbService.fetchAllUserFeedbacks().catch(err => {
-            setSystemErrors(prev => [...prev, `Gagal memuat feedback: ${err?.message}`]);
-            return [];
-          }),
-          dbService.checkTablesStatus().catch(err => {
-            setSystemErrors(prev => [...prev, `Gagal cek tabel: ${err?.message}`]);
-            return { allExist: false, tables: {} };
-          })
-        ]);
+        // 2. Ambil status tabel dan hitung metrik database asli
+        const tablesStatus = await dbService.checkTablesStatus().catch(err => {
+          setSystemErrors(prev => [...prev, `Gagal cek tabel: ${err?.message}`]);
+          return { allExist: false, tables: {} };
+        });
 
         const latency = Date.now() - startTime;
         setDbLatencyMs(latency);
-        setFeedbacksList(feedbackData);
         setTablesHealth(tablesStatus.tables);
         setAllTablesOk(tablesStatus.allExist);
 
@@ -586,9 +578,11 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
           </div>
         </div>
 
-        {/* 2. Navigasi Tab Menu Administrator */}
-        <div className={`p-1.5 rounded-2xl border flex items-center gap-1.5 overflow-x-auto custom-scrollbar ${
-          isLight ? 'bg-slate-100/80 border-slate-200' : 'bg-[#0f172a] border-white/10'
+        {/* 2. Navigasi Menu Portal Administrator (Model Grid Ikon Modern) */}
+        <div className={`p-2 rounded-2xl border grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 ${
+          isLight
+            ? 'bg-white border-slate-200/80 shadow-[0_2px_12px_rgba(15,23,42,0.04)]'
+            : 'bg-[#0f172a] border-white/10 shadow-lg'
         }`}>
           {[
             { id: 'dashboard' as AdminTab, label: 'Dashboard', icon: Activity },
@@ -605,16 +599,30 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setActivePortalTab(tab.id)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-2 cursor-pointer ${
+                className={`px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 cursor-pointer active:scale-[0.98] ${
                   isActive
-                    ? 'bg-teal-500 text-slate-950 shadow-md font-black'
+                    ? isLight
+                      ? 'bg-[#0B1324] text-white border-[#0B1324] shadow-sm'
+                      : 'bg-cyan-500/15 text-white border-cyan-400/40 shadow-sm'
                     : isLight
-                    ? 'text-slate-600 hover:text-slate-950 hover:bg-white/80'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      ? 'bg-slate-50/80 hover:bg-slate-100 text-slate-700 border-slate-200/70'
+                      : 'bg-white/[0.03] hover:bg-white/[0.07] text-slate-300 border-white/5'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  isActive
+                    ? isLight
+                      ? 'bg-white/15 text-emerald-300'
+                      : 'bg-cyan-400/20 text-cyan-300'
+                    : isLight
+                      ? 'bg-white text-slate-500 border border-slate-200/80'
+                      : 'bg-white/5 text-slate-400'
+                }`}>
+                  <Icon className="w-3.5 h-3.5 stroke-[2.2]" />
+                </div>
+                <span className="text-xs font-bold leading-tight truncate flex-1">
+                  {tab.label}
+                </span>
               </button>
             );
           })}
@@ -643,7 +651,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                   {userProfilesList.length}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                  <span>{cloudUserCount > 0 ? `${cloudUserCount} akun di Supabase cloud` : '1 akun aktif terverifikasi'}</span>
+                  <span>{cloudUserCount > 0 ? `${cloudUserCount} akun di cloud` : '1 akun aktif terverifikasi'}</span>
                 </p>
               </div>
 
@@ -687,7 +695,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                 <p className="text-[11px] text-slate-400 mt-1">
                   {totalDbRecords > 0
                     ? `${activityStats.tasksCount} tugas • ${activityStats.habitsCount} kebiasaan • ${activityStats.notesCount + activityStats.transactionsCount} catatan & kas`
-                    : 'Tersinkronisasi lokal & cloud Supabase'}
+                    : 'Tersinkronisasi lokal & cloud'}
                 </p>
               </div>
 
@@ -812,7 +820,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                   <div className="space-y-3 text-xs">
                     <div className="flex justify-between items-center py-1.5 border-b border-white/5">
                       <span className="text-slate-400">Database Engine:</span>
-                      <span className="font-bold font-mono">PostgreSQL (Supabase)</span>
+                      <span className="font-bold font-mono">PostgreSQL Cloud</span>
                     </div>
                     <div className="flex justify-between items-center py-1.5 border-b border-white/5">
                       <span className="text-slate-400">Status Koneksi:</span>
@@ -822,7 +830,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                     </div>
                     <div className="flex justify-between items-center py-1.5 border-b border-white/5">
                       <span className="text-slate-400">Penyimpanan Avatar & File:</span>
-                      <span className="font-bold font-mono">Supabase Storage Bucket</span>
+                      <span className="font-bold font-mono">Cloud Storage Bucket</span>
                     </div>
                     <div className="flex justify-between items-center py-1.5 border-b border-white/5">
                       <span className="text-slate-400">Hak Akses Role:</span>
@@ -1152,7 +1160,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
             }`}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-white/10">
                 <div>
-                  <h3 className="text-lg font-bold">Integritas Database Supabase & Penyimpanan</h3>
+                  <h3 className="text-lg font-bold">Integritas Database Cloud & Penyimpanan</h3>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Pemeriksaan status koneksi setiap tabel relasional PostgreSQL dan status penyimpanan cloud.
                   </p>
@@ -1221,60 +1229,15 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
         {/* TAB 6: BANTUAN & FEEDBACK PENGGUNA                                         */}
         {/* ========================================================================= */}
         {activePortalTab === 'feedback' && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            <div className={`p-6 rounded-3xl border ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#0f172a] border-white/10'
-            }`}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold">Laporan Masukan & Bantuan Pengguna</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Membaca saran, keluhan, dan penilaian pengalaman pengguna yang tersimpan di database.
-                  </p>
-                </div>
-                <span className="text-xs font-mono font-bold px-3 py-1 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                  {feedbacksList.length} Saran Diterima
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                {feedbacksList.length === 0 ? (
-                  <div className="py-12 text-center text-slate-400 text-xs">
-                    Belum ada ulasan atau saran kendala dari pengguna di database.
-                  </div>
-                ) : (
-                  feedbacksList.map((fb) => (
-                    <div
-                      key={fb.id}
-                      className={`p-4 rounded-2xl border space-y-2.5 ${
-                        isLight ? 'bg-slate-50 border-slate-200' : 'bg-white/[0.03] border-white/5'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center text-xs">
-                            {fb.fullName?.charAt(0).toUpperCase() || 'U'}
-                          </div>
-                          <div>
-                            <div className="font-bold text-xs">{fb.fullName}</div>
-                            {fb.email && <div className="text-[11px] text-slate-400">{fb.email}</div>}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30">
-                          <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                          <span className="text-xs font-bold text-amber-300">{fb.rating}.0</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 text-xs text-slate-300 italic">
-                        "{fb.suggestions || 'Pengguna memberikan penilaian bintang tanpa teks tambahan.'}"
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+          <div className="animate-in fade-in duration-200">
+            <AdminFeedbackView
+              currentUser={currentUser}
+              userProfile={userProfile}
+              onShowToast={onShowToast}
+              onNavigateToDashboard={onNavigateToDashboard}
+              theme={theme}
+              embedded={true}
+            />
           </div>
         )}
 

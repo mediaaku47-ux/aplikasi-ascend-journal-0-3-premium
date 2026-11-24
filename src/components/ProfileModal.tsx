@@ -29,7 +29,7 @@ interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   userProfile: UserProfile;
-  onUpdateProfile: (updated: UserProfile) => void;
+  onUpdateProfile: (updated: UserProfile) => Promise<{ ok?: boolean; error?: string } | void> | { ok?: boolean; error?: string } | void;
   currentUser?: SupabaseUser | null;
   onOpenSupabaseModal?: () => void;
   onShowToast?: (msg: string) => void;
@@ -79,6 +79,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [feedbackSuggestions, setFeedbackSuggestions] = useState<string>(userProfile.feedback?.suggestions || '');
   const [feedbackTags, setFeedbackTags] = useState<string[]>(userProfile.feedback?.tags || []);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [isSavingFeedback, setIsSavingFeedback] = useState(false);
 
   // --- Profile state ---
@@ -195,7 +196,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     } catch (err: any) {
       console.error('Update password error:', err);
       setPasswordError(
-        err?.message || 'Gagal memperbarui kata sandi. Pastikan Anda sedang login dengan sesi Supabase yang aktif.'
+        err?.message || 'Gagal memperbarui kata sandi. Pastikan Anda sedang login dengan sesi akun yang aktif.'
       );
     } finally {
       setIsUpdatingPassword(false);
@@ -346,7 +347,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <div className="flex-1 text-center sm:text-left space-y-1.5">
                   <h3 className={`font-bold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>Foto Profil Pengguna</h3>
                   <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-500' : 'text-white/60'}`}>
-                    Unggah foto avatar Anda. File otomatis disimpan secara aman ke Supabase Storage (Private Bucket <code className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10">profiles</code>) dan kolom <code className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10">avatar_url</code> tabel database.
+                    Unggah foto avatar Anda. File otomatis disimpan secara aman ke penyimpanan cloud dan tersinkron ke profil akun Anda.
                   </p>
                 </div>
               </div>
@@ -439,7 +440,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <span>Petunjuk Kata Sandi Aman & Kuat</span>
                 </div>
                 <p className="text-xs text-white/70 leading-relaxed">
-                  Untuk melindungi akun Supabase Anda, pastikan kata sandi baru memenuhi standar keamanan berikut:
+                  Untuk melindungi akun Anda, pastikan kata sandi baru memenuhi standar keamanan berikut:
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs">
@@ -648,6 +649,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
               )}
 
+              {feedbackError && (
+                <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2.5 animate-in fade-in">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{feedbackError}</span>
+                </div>
+              )}
+
               {/* 2-Step Progress Indicator */}
               <div className="flex items-center justify-between gap-2 text-xs">
                 <button
@@ -846,8 +854,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     <button
                       type="button"
                       disabled={isSavingFeedback}
-                      onClick={() => {
+                      onClick={async () => {
                         setIsSavingFeedback(true);
+                        setFeedbackError(null);
+                        setFeedbackSuccess(null);
                         const newFeedback: AppFeedback = {
                           rating: feedbackRating,
                           suggestions: feedbackSuggestions.trim(),
@@ -856,32 +866,38 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                           updatedAt: new Date().toISOString(),
                         };
 
-                        triggerConfetti({
-                          particleCount: 40,
-                          spread: 60,
-                          colors: ['#f59e0b', '#38bdf8', '#10b981'],
-                        });
+                        const updatedProfile = {
+                          ...userProfile,
+                          feedback: newFeedback,
+                        };
 
-                        setTimeout(() => {
-                          const updatedProfile = {
-                            ...userProfile,
-                            feedback: newFeedback,
-                          };
-                          onUpdateProfile(updatedProfile);
+                        try {
+                          const res = await onUpdateProfile(updatedProfile);
                           localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
                           localStorage.setItem('journalstream_app_feedback', JSON.stringify(newFeedback));
-                          setFeedbackSuccess('Bintang dan saran Anda berhasil disimpan! Terima kasih.');
-                          setIsSavingFeedback(false);
-                          if (onShowToast) {
-                            onShowToast('Bintang dan saran berhasil disimpan di profil Anda! ⭐');
+                          if (res && res.ok === false) {
+                            setFeedbackError(res.error || 'Tersimpan di perangkat lokal, tetapi gagal sinkron ke server cloud.');
+                            onShowToast?.(res.error || 'Gagal menyimpan penilaian ke cloud.');
+                          } else {
+                            triggerConfetti({
+                              particleCount: 40,
+                              spread: 60,
+                              colors: ['#f59e0b', '#38bdf8', '#10b981'],
+                            });
+                            setFeedbackSuccess('Bintang dan saran Anda berhasil disimpan ke cloud! Terima kasih.');
+                            onShowToast?.('Bintang dan saran berhasil disimpan ke cloud!');
                           }
-                        }, 250);
+                        } catch (err: any) {
+                          setFeedbackError(err?.message || 'Gagal menyimpan penilaian ke cloud.');
+                        } finally {
+                          setIsSavingFeedback(false);
+                        }
                       }}
                       className={`py-2.5 px-5 rounded-xl ${
                         isLight 
                           ? 'bg-[#003B2F] hover:bg-[#002e24] text-white' 
                           : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 hover:from-emerald-400 hover:to-sky-400 text-slate-950'
-                      } font-bold text-xs sm:text-sm shadow-md flex items-center gap-2 cursor-pointer transition-all active:scale-98`}
+                      } font-bold text-xs sm:text-sm shadow-md flex items-center gap-2 cursor-pointer transition-all active:scale-98 disabled:opacity-50`}
                     >
                       <Check className="w-4 h-4" />
                       <span>{isSavingFeedback ? 'Menyimpan...' : 'Simpan Bintang & Saran'}</span>
@@ -898,7 +914,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         <div className={`p-4 border-t ${isLight ? 'border-slate-200 bg-slate-50/50 text-slate-500' : 'border-white/10 bg-white/[0.02] text-white/50'} flex items-center justify-between text-xs`}>
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-teal-400" />
-            <span>Tersinkronisasi Aman dengan Supabase Auth & Cloud</span>
+            <span>Tersinkronisasi Aman dengan Sistem Cloud</span>
           </div>
           <button
             onClick={onClose}
