@@ -290,44 +290,98 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {showAgendaCardToday && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTab?.('agenda')}
-                  className={`p-4 rounded-2xl border text-left transition-all flex items-start justify-between gap-3 cursor-pointer ${
-                    isLight
-                      ? 'bg-white border-slate-200/90 hover:border-teal-400 text-slate-900 shadow-xs'
-                      : 'bg-[#111827] border-white/10 hover:border-teal-500/40 text-white'
-                  }`}
-                >
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div
-                      className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
-                        isLight
-                          ? 'bg-sky-50 border-sky-200 text-sky-700'
-                          : 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+              {showAgendaCardToday && (() => {
+                const isAllAgendasCompleted = pendingTasksToday.length === 0;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToTab?.('agenda')}
+                    className={`p-4 rounded-2xl border text-left transition-all flex items-start justify-between gap-3 cursor-pointer relative overflow-hidden ${
+                      isAllAgendasCompleted
+                        ? isLight
+                          ? 'bg-gradient-to-br from-emerald-50 via-teal-50/70 to-white border-emerald-300 hover:border-emerald-400 text-emerald-950 shadow-sm shadow-emerald-500/10'
+                          : 'bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-[#111827] border-emerald-500/40 hover:border-emerald-400/60 text-white shadow-sm shadow-emerald-500/10'
+                        : isLight
+                        ? 'bg-white border-slate-200/90 hover:border-teal-400 text-slate-900 shadow-xs'
+                        : 'bg-[#111827] border-white/10 hover:border-teal-500/40 text-white'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div
+                        className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                          isAllAgendasCompleted
+                            ? isLight
+                              ? 'bg-gradient-to-br from-emerald-500 to-teal-500 border-emerald-400 text-white shadow-xs shadow-emerald-500/25'
+                              : 'bg-gradient-to-br from-emerald-500/30 to-teal-500/20 border-emerald-400/50 text-emerald-300'
+                            : isLight
+                            ? 'bg-sky-50 border-sky-200 text-sky-700'
+                            : 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                        }`}
+                      >
+                        {isAllAgendasCompleted ? (
+                          <CheckCircle2 className="w-5 h-5" />
+                        ) : (
+                          <ListChecks className="w-5 h-5" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        {isAllAgendasCompleted ? (
+                          <>
+                            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                  isLight
+                                    ? 'bg-emerald-100/90 text-emerald-800 border-emerald-300/80'
+                                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30'
+                                }`}
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                <span>{agendasToday.length}/{agendasToday.length} Tuntas</span>
+                              </span>
+                            </div>
+                            <p
+                              className={`text-xs sm:text-sm font-bold leading-snug ${
+                                isLight ? 'text-emerald-950' : 'text-emerald-100'
+                              }`}
+                            >
+                              Kamu sudah menyelesaikan agenda hari ini, tetap konsisten!
+                            </p>
+                            <p
+                              className={`text-[11px] mt-1 leading-relaxed ${
+                                isLight ? 'text-emerald-800/85' : 'text-emerald-200/80'
+                              }`}
+                            >
+                              Seluruh {agendasToday.length} agenda hari ini selesai dikerjakan — hilang otomatis pukul 00.00 saat pergantian hari.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs sm:text-sm font-bold truncate">
+                              {isPre22AgendaWindow
+                                ? `Selesaikan ${pendingTasksToday.length} Agenda Sebelum 22.00!`
+                                : `${agendasToday.length} Agenda Hari Ini`}
+                            </p>
+                            <p className={`text-[11px] mt-0.5 line-clamp-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                              {isPre22AgendaWindow
+                                ? `Peringatan malam (21.00–21.59): "${pendingTasksToday[0]?.title}" dan ${pendingTasksToday.length} agenda menunggu sebelum pukul 22.00.`
+                                : `Contoh: "${pendingTasksToday[0]?.title}" (${pendingTasksToday.length} belum selesai) — muncul mulai pukul 10.00 dan hilang otomatis pukul 00.00 saat pergantian hari.`}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <ChevronRight
+                      className={`w-4 h-4 shrink-0 mt-1 ${
+                        isAllAgendasCompleted
+                          ? isLight
+                            ? 'text-emerald-600'
+                            : 'text-emerald-400'
+                          : 'text-slate-400'
                       }`}
-                    >
-                      <ListChecks className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-bold truncate">
-                        {isPre22AgendaWindow && pendingTasksToday.length > 0
-                          ? `Selesaikan ${pendingTasksToday.length} Agenda Sebelum 22.00!`
-                          : `${agendasToday.length} Agenda Hari Ini`}
-                      </p>
-                      <p className={`text-[11px] mt-0.5 line-clamp-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                        {pendingTasksToday.length > 0
-                          ? isPre22AgendaWindow
-                            ? `Peringatan malam (21.00–21.59): "${pendingTasksToday[0]?.title}" dan ${pendingTasksToday.length} agenda menunggu sebelum pukul 22.00.`
-                            : `Contoh: "${pendingTasksToday[0]?.title}" (${pendingTasksToday.length} belum selesai) — muncul mulai pukul 10.00 dan hilang otomatis pukul 00.00 saat pergantian hari.`
-                          : `Seluruh ${agendasToday.length} agenda hari ini sudah selesai — kartu tetap tampil dan hilang otomatis pukul 00.00 saat pergantian hari.`}
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 mt-1" />
-                </button>
-              )}
+                    />
+                  </button>
+                );
+              })()}
 
               {pendingHabitsToday.length > 0 && (
                 <button
