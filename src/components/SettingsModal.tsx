@@ -15,7 +15,7 @@ import {
   requestNotificationPermission, 
   getNotificationSettings, 
   saveNotificationSettings, 
-  sendHabitTestNotification,
+  sendTestNotification,
   DeviceNotificationSettings 
 } from '../utils/notifications';
 
@@ -83,7 +83,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders === true;
 
-  const handleToggleHabitNotification = () => {
+  const handleToggleHabitNotification = async () => {
     const nextVal = !isHabitNotifActive;
     const updated = {
       ...notifSettings,
@@ -92,30 +92,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
     const saved = saveNotificationSettings(updated);
     setNotifSettings(saved);
+    if (nextVal && getNotificationPermissionStatus() === 'default') {
+      await requestNotificationPermission();
+      setPermissionStatus(getNotificationPermissionStatus());
+    }
   };
 
   const handleRequestPermission = async () => {
     const res = await requestNotificationPermission();
     setPermissionStatus(getNotificationPermissionStatus());
+    setNotifSettings(getNotificationSettings());
     if (res === 'granted') {
       setNotifFeedback('Izin notifikasi perangkat berhasil diaktifkan.');
       setTimeout(() => setNotifFeedback(null), 3000);
+    } else if (res === 'denied') {
+      setNotifFeedback('Izin notifikasi ditolak browser. Buka setelan situs peramban Anda.');
+      setTimeout(() => setNotifFeedback(null), 4000);
     }
   };
 
   const handleTestDeviceNotification = async () => {
-    if (!isHabitNotifActive) {
-      setNotifFeedback('Sakelar pengingat sedang dinonaktifkan. Aktifkan sakelar di atas terlebih dahulu.');
-      setTimeout(() => setNotifFeedback(null), 4000);
-      return;
-    }
     setIsTestingNotif(true);
     setNotifFeedback(null);
     try {
-      const ok = await sendHabitTestNotification('Rutinitas Kebiasaan', '4 jam 50 menit');
-      setPermissionStatus(getNotificationPermissionStatus());
+      const ok = await sendTestNotification();
+      const latestPerm = getNotificationPermissionStatus();
+      setPermissionStatus(latestPerm);
+      setNotifSettings(getNotificationSettings());
       if (ok) {
-        setNotifFeedback('Notifikasi pengingat kebiasaan (5 jam & 3 jam) berhasil terkirim ke HP / Laptop Anda!');
+        setNotifFeedback('Notifikasi uji coba berhasil terkirim ke HP / Laptop Anda!');
+      } else if (latestPerm === 'denied') {
+        setNotifFeedback('Izin notifikasi diblokir peramban. Aktifkan melalui Setelan Situs.');
       } else {
         setNotifFeedback('Gagal mengirim notifikasi. Periksa izin perangkat Anda.');
       }

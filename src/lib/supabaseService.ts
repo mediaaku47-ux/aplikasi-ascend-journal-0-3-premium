@@ -49,7 +49,7 @@ export const authService = {
     });
 
     if (error) {
-      console.error('Supabase Auth signUp error:', error);
+      console.warn('Supabase Auth signUp notice:', error?.message || error);
       throw error;
     }
 
@@ -82,7 +82,7 @@ export const authService = {
     });
 
     if (error) {
-      console.error('Supabase Auth signIn error:', error);
+      console.warn('Supabase Auth signIn notice:', error?.message || error);
       throw error;
     }
 
@@ -267,7 +267,7 @@ export function getReadableAuthError(error: any): string {
     return 'Email atau kata sandi tidak cocok. Silakan periksa kembali.';
   }
   if (msg.includes('User already registered') || msg.includes('already registered') || msg.includes('User already exists')) {
-    return 'Email ini sudah terdaftar. Silakan pilih tab "Masuk".';
+    return 'Email ini sudah terdaftar. Silakan masuk menggunakan akun Anda.';
   }
   if (msg.includes('Password should be at least') || msg.includes('password is too short')) {
     return 'Kata sandi minimal harus 6 karakter.';
@@ -1136,7 +1136,7 @@ export const dbService = {
     }
   },
 
-  // Mengambil seluruh ulasan & penilaian bintang beserta status diagnostik RLS yang jujur
+  // Mengambil seluruh ulasan & penilaian bintang beserta status diagnostik RLS yang jujur (100% dari Supabase)
   async fetchAllUserFeedbacksWithStatus(): Promise<{
     feedbacks: Array<{
       id: string;
@@ -1177,14 +1177,25 @@ export const dbService = {
         errorParts.push(`user_profiles: ${profilesRes.error.message}`);
       }
 
+      const dedicatedErrMsg = dedicatedRes.error?.message || '';
       const dedicatedMissing =
         Boolean(dedicatedRes.error) &&
         (dedicatedRes.error?.code === 'PGRST205' ||
           dedicatedRes.error?.code === '42P01' ||
-          dedicatedRes.error?.message?.includes('user_feedbacks'));
+          (dedicatedErrMsg.includes('user_feedbacks') &&
+            (dedicatedErrMsg.includes('does not exist') ||
+              dedicatedErrMsg.includes('schema cache') ||
+              dedicatedErrMsg.includes('Could not find'))));
 
       if (dedicatedRes.error && !dedicatedMissing) {
         errorParts.push(`user_feedbacks: ${dedicatedRes.error.message}`);
+      }
+
+      const profilesById = new Map<string, any>();
+      if (Array.isArray(profilesRes.data)) {
+        profilesRes.data.forEach((row: any) => {
+          if (row?.id) profilesById.set(row.id, row);
+        });
       }
 
       const byUserId = new Map<
@@ -1226,6 +1237,7 @@ export const dbService = {
           byUserId.set(item.id, {
             ...existing,
             ...item,
+            fullName: item.fullName.trim() || existing.fullName.trim(),
             email: item.email || existing.email,
             avatarUrl: item.avatarUrl || existing.avatarUrl,
             firstAppOpenAt: item.firstAppOpenAt || existing.firstAppOpenAt,
@@ -1245,37 +1257,50 @@ export const dbService = {
           }
 
           if (parsedFb && (parsedFb.rating || parsedFb.suggestions)) {
-            const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(parsedFb.rating) || 5)));
-            upsertRow({
-              id: row.id,
-              email: row.email || undefined,
-              fullName: row.full_name || 'Pengguna',
-              avatarUrl: row.avatar_url || undefined,
-              rating: normalizedRating,
-              suggestions: parsedFb.suggestions || '',
-              tags: Array.isArray(parsedFb.tags) ? parsedFb.tags : [],
-              submittedAt: parsedFb.submittedAt || row.updated_at || row.created_at,
-              updatedAt: parsedFb.updatedAt || row.updated_at,
-              firstAppOpenAt: row.first_app_open_at,
-            });
+            const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(parsedFb.rating) || 0)));
+            if (normalizedRating >= 1) {
+              upsertRow({
+                id: row.id,
+                email: typeof row.email === 'string' && row.email.trim() ? row.email.trim() : undefined,
+                fullName: typeof row.full_name === 'string' ? row.full_name.trim() : '',
+                avatarUrl: typeof row.avatar_url === 'string' && row.avatar_url.trim() ? row.avatar_url.trim() : undefined,
+                rating: normalizedRating,
+                suggestions: typeof parsedFb.suggestions === 'string' ? parsedFb.suggestions : '',
+                tags: Array.isArray(parsedFb.tags) ? parsedFb.tags : [],
+                submittedAt: parsedFb.submittedAt || row.updated_at || row.created_at || undefined,
+                updatedAt: parsedFb.updatedAt || row.updated_at || undefined,
+                firstAppOpenAt: row.first_app_open_at || undefined,
+              });
+            }
           }
         });
       }
 
       if (!dedicatedRes.error && Array.isArray(dedicatedRes.data)) {
         dedicatedRes.data.forEach((row: any) => {
-          const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(row.rating) || 5)));
-          upsertRow({
-            id: row.user_id,
-            email: row.email || undefined,
-            fullName: row.full_name || 'Pengguna',
-            avatarUrl: row.avatar_url || undefined,
-            rating: normalizedRating,
-            suggestions: row.suggestions || '',
-            tags: Array.isArray(row.tags) ? row.tags : [],
-            submittedAt: row.submitted_at || row.updated_at,
-            updatedAt: row.updated_at || row.submitted_at,
-          });
+          const profileMatch = profilesById.get(row.user_id);
+          const rawName = typeof row.full_name === 'string' ? row.full_name.trim() : '';
+          const profileName = typeof profileMatch?.full_name === 'string' ? profileMatch.full_name.trim() : '';
+          const rawEmail = typeof row.email === 'string' && row.email.trim() ? row.email.trim() : undefined;
+          const profileEmail = typeof profileMatch?.email === 'string' && profileMatch.email.trim() ? profileMatch.email.trim() : undefined;
+          const rawAvatar = typeof row.avatar_url === 'string' && row.avatar_url.trim() ? row.avatar_url.trim() : undefined;
+          const profileAvatar = typeof profileMatch?.avatar_url === 'string' && profileMatch.avatar_url.trim() ? profileMatch.avatar_url.trim() : undefined;
+          const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(row.rating) || 0)));
+
+          if (normalizedRating >= 1) {
+            upsertRow({
+              id: row.user_id,
+              email: rawEmail || profileEmail,
+              fullName: rawName || profileName || '',
+              avatarUrl: rawAvatar || profileAvatar,
+              rating: normalizedRating,
+              suggestions: typeof row.suggestions === 'string' ? row.suggestions : '',
+              tags: Array.isArray(row.tags) ? row.tags : [],
+              submittedAt: row.submitted_at || row.updated_at || undefined,
+              updatedAt: row.updated_at || row.submitted_at || undefined,
+              firstAppOpenAt: profileMatch?.first_app_open_at || undefined,
+            });
+          }
         });
       }
 
@@ -1285,16 +1310,16 @@ export const dbService = {
         return timeB - timeA;
       });
 
-      const userFeedbacksCount = Array.isArray(dedicatedRes.data) ? dedicatedRes.data.length : 0;
+      const userFeedbacksTableExists = !dedicatedMissing && !dedicatedRes.error;
       const rlsRestrictedLikely =
-        !profilesRes.error && totalProfileRowsRead <= 1 && userFeedbacksCount <= 1;
+        !userFeedbacksTableExists && !profilesRes.error && totalProfileRowsRead <= 1;
 
       return {
         feedbacks,
         errorMessage: errorParts.length > 0 ? errorParts.join(' | ') : undefined,
         rlsRestrictedLikely,
         totalProfileRowsRead,
-        userFeedbacksTableExists: !dedicatedMissing && !dedicatedRes.error,
+        userFeedbacksTableExists,
       };
     } catch (err: any) {
       console.error('Error fetching feedbacks for admin:', err);
@@ -1440,170 +1465,255 @@ export const dbService = {
   // PEMBERITAHUAN APLIKASI (ANNOUNCEMENTS) - ADMIN WRITE, ALL USERS READ
   // ============================================================================
 
-  // Ambil semua pemberitahuan aktif untuk pengguna (atau semua bagi admin)
-  async fetchAnnouncements(onlyActive = true): Promise<AppAnnouncement[]> {
-    const STORAGE_KEY = 'ascend_app_announcements_cache';
-    const fallbackList = (): AppAnnouncement[] => {
-      try {
-        const cached = localStorage.getItem(STORAGE_KEY);
-        if (cached !== null) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) {
-            return onlyActive ? parsed.filter((a: AppAnnouncement) => a.isActive) : parsed;
-          }
-        }
-      } catch {}
-      return [];
-    };
-
+  // Ambil pemberitahuan langsung dari Supabase beserta status error jujur (untuk Admin Portal & Modal)
+  async fetchAnnouncementsWithStatus(onlyActive = false): Promise<{
+    announcements: AppAnnouncement[];
+    error?: string;
+    tableMissing?: boolean;
+  }> {
     if (!isSupabaseConfigured()) {
-      return fallbackList();
+      return {
+        announcements: [],
+        error: 'Konfigurasi Supabase belum aktif.',
+        tableMissing: false,
+      };
     }
 
     try {
       const client = getSupabase();
-      let query = client
-        .from('announcements')
-        .select('*')
-        .order('is_pinned', { ascending: false })
-        .order('created_at', { ascending: false });
+      const buildQuery = (withPinnedOrder: boolean, withCreatedOrder: boolean) => {
+        let q = client.from('announcements').select('*');
+        if (withPinnedOrder) {
+          q = q.order('is_pinned', { ascending: false });
+        }
+        if (withCreatedOrder) {
+          q = q.order('created_at', { ascending: false });
+        }
+        if (onlyActive) {
+          q = q.eq('is_active', true);
+        }
+        return q;
+      };
 
-      if (onlyActive) {
-        query = query.eq('is_active', true);
+      let { data, error } = await buildQuery(true, true);
+
+      // Fallback apabila tabel lama belum memiliki kolom is_pinned / created_at
+      if (error && (error.code === '42703' || error.code === 'PGRST204' || (error.message || '').includes('column'))) {
+        const retryCreated = await buildQuery(false, true);
+        if (!retryCreated.error) {
+          data = retryCreated.data;
+          error = null;
+        } else {
+          const retryPlain = await buildQuery(false, false);
+          if (!retryPlain.error) {
+            data = retryPlain.data;
+            error = null;
+          } else {
+            error = retryPlain.error;
+          }
+        }
       }
 
-      const { data, error } = await query;
-
       if (error) {
-        // Tabel announcements mungkin belum dibuat atau schema cache belum direfresh
-        console.warn('Gagal memuat pemberitahuan dari Supabase (fallback ke cache):', error.message);
-        return fallbackList();
+        const msg = error.message || '';
+        const tableMissing =
+          error.code === 'PGRST205' ||
+          error.code === '42P01' ||
+          msg.includes('does not exist') ||
+          msg.includes('schema cache') ||
+          msg.includes('Could not find');
+        return {
+          announcements: [],
+          error: error.message,
+          tableMissing,
+        };
       }
 
       const formatted: AppAnnouncement[] = (data || []).map((row: any) => ({
         id: row.id,
-        title: row.title,
-        message: row.message,
+        title: row.title || '',
+        message: row.message || '',
         type: row.type || 'info',
         isActive: row.is_active ?? true,
         isPinned: row.is_pinned ?? false,
-        authorName: row.author_name || 'Tim Pembuat Aplikasi',
-        authorEmail: row.author_email || undefined,
+        authorName: typeof row.author_name === 'string' ? row.author_name.trim() : '',
+        authorEmail: typeof row.author_email === 'string' && row.author_email.trim() ? row.author_email.trim() : undefined,
         actionUrl: row.action_url || undefined,
         actionLabel: row.action_label || undefined,
-        createdAt: row.created_at || new Date().toISOString(),
-        updatedAt: row.updated_at,
-        expiresAt: row.expires_at,
+        createdAt: row.created_at || '',
+        updatedAt: row.updated_at || undefined,
+        expiresAt: row.expires_at || undefined,
       }));
 
-      // Gabungkan dengan item lokal yang baru dibuat jika belum tersinkronisasi ke server
-      const localList = fallbackList();
-      let merged = formatted;
-      if (formatted.length === 0) {
-        merged = localList;
-      } else if (localList.length > 0) {
-        const remoteIds = new Set(formatted.map((f) => f.id));
-        const pendingLocal = localList.filter((l) => !remoteIds.has(l.id));
-        if (pendingLocal.length > 0) {
-          merged = [...formatted, ...pendingLocal];
-        }
-      }
-
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-      } catch {}
-
-      return merged;
-    } catch (err) {
-      console.warn('Error fetching announcements:', err);
-      return fallbackList();
+      return { announcements: formatted };
+    } catch (err: any) {
+      return {
+        announcements: [],
+        error: err?.message || 'Gagal memuat pemberitahuan dari Supabase.',
+      };
     }
   },
 
-  // Simpan / Buat pemberitahuan baru oleh admin
-  async upsertAnnouncement(announcement: AppAnnouncement): Promise<boolean> {
+  // Ambil semua pemberitahuan aktif untuk pengguna (atau semua bagi admin)
+  async fetchAnnouncements(onlyActive = true): Promise<AppAnnouncement[]> {
     const STORAGE_KEY = 'ascend_app_announcements_cache';
-
-    // Update lokal cache terlebih dahulu
-    try {
-      const cached = localStorage.getItem(STORAGE_KEY);
-      let list: AppAnnouncement[] = cached ? JSON.parse(cached) : [];
-      const idx = list.findIndex((a) => a.id === announcement.id);
-      if (idx >= 0) {
-        list[idx] = announcement;
-      } else {
-        list.unshift(announcement);
-      }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-      window.dispatchEvent(new Event('ascend-announcements-read-updated'));
-    } catch (e) {
-      console.warn('Gagal menyimpan pengumuman ke cache lokal:', e);
+    const res = await this.fetchAnnouncementsWithStatus(onlyActive);
+    if (!res.error) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(res.announcements));
+      } catch {}
+      return res.announcements;
     }
 
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY);
+      if (cached !== null) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          return onlyActive ? parsed.filter((a: AppAnnouncement) => a.isActive) : parsed;
+        }
+      }
+    } catch {}
+    return [];
+  },
+
+  // Simpan / Buat pemberitahuan langsung di Supabase dengan status hasil jujur
+  async upsertAnnouncementWithStatus(announcement: AppAnnouncement): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured()) {
-      return true;
+      return { success: false, error: 'Konfigurasi Supabase belum aktif.' };
     }
 
     try {
       const client = getSupabase();
-      const payload = {
+      const { data: sessionData } = await client.auth.getSession();
+      if (!sessionData?.session?.access_token) {
+        return {
+          success: false,
+          error: 'Sesi login Supabase tidak aktif atau sudah kedaluwarsa. Silakan masuk ulang dengan akun admin terlebih dahulu.',
+        };
+      }
+
+      const nowIso = new Date().toISOString();
+      const fullPayload: Record<string, any> = {
         id: announcement.id,
         title: announcement.title,
         message: announcement.message,
         type: announcement.type,
         is_active: announcement.isActive,
         is_pinned: announcement.isPinned ?? false,
-        author_name: announcement.authorName || 'Tim Pembuat Aplikasi',
-        author_email: announcement.authorEmail,
-        action_url: announcement.actionUrl,
-        action_label: announcement.actionLabel,
-        updated_at: new Date().toISOString(),
+        author_name: announcement.authorName || null,
+        author_email: announcement.authorEmail || null,
+        action_url: announcement.actionUrl || null,
+        action_label: announcement.actionLabel || null,
+        created_at: announcement.createdAt || nowIso,
+        updated_at: nowIso,
       };
 
-      const { error } = await client.from('announcements').upsert(payload, { onConflict: 'id' });
-      if (error) {
-        // Jika tabel announcements belum ada di schema cache Supabase (misal error PGRST205 atau 42P01)
-        console.warn('Supabase announcements upsert warning (data tersimpan aman di lokal cache):', error.message || error);
-        return true;
+      let { error } = await client.from('announcements').upsert(fullPayload, { onConflict: 'id' });
+
+      // Jika tabel announcements di Supabase belum memiliki kolom opsional tertentu, coba ulang dengan kolom inti
+      if (
+        error &&
+        (error.code === 'PGRST204' ||
+          error.code === '42703' ||
+          (error.message || '').includes('Could not find') ||
+          (error.message || '').includes('does not exist'))
+      ) {
+        const corePayload: Record<string, any> = {
+          id: announcement.id,
+          title: announcement.title,
+          message: announcement.message,
+          type: announcement.type,
+          is_active: announcement.isActive,
+          author_name: announcement.authorName || null,
+        };
+        const retryCore = await client.from('announcements').upsert(corePayload, { onConflict: 'id' });
+        error = retryCore.error;
+
+        if (
+          error &&
+          (error.code === 'PGRST204' ||
+            error.code === '42703' ||
+            (error.message || '').includes('Could not find') ||
+            (error.message || '').includes('does not exist'))
+        ) {
+          const minimalPayload: Record<string, any> = {
+            id: announcement.id,
+            title: announcement.title,
+            message: announcement.message,
+            is_active: announcement.isActive,
+          };
+          const retryMinimal = await client.from('announcements').upsert(minimalPayload, { onConflict: 'id' });
+          error = retryMinimal.error;
+        }
       }
-      return true;
+
+      if (error) {
+        const errMsg = error.message || '';
+        if (error.code === '42501' || errMsg.toLowerCase().includes('row-level security')) {
+          return {
+            success: false,
+            error:
+              'Ditolak kebijakan keamanan RLS tabel announcements di Supabase. Pastikan policy INSERT dan UPDATE untuk pengguna terautentikasi/admin sudah dibuat di SQL Editor.',
+          };
+        }
+        if (error.code === 'PGRST205' || error.code === '42P01') {
+          return {
+            success: false,
+            error: 'Tabel announcements belum ditemukan di Supabase. Jalankan skema SQL terlebih dahulu di SQL Editor.',
+          };
+        }
+        return { success: false, error: errMsg };
+      }
+
+      window.dispatchEvent(new Event('ascend-announcements-updated'));
+      window.dispatchEvent(new Event('ascend-announcements-read-updated'));
+      return { success: true };
     } catch (err: any) {
-      console.warn('Upsert announcement error (data aman di lokal cache):', err?.message || err);
-      return true;
+      return { success: false, error: err?.message || 'Gagal menyimpan pemberitahuan ke Supabase.' };
     }
   },
 
-  // Hapus pemberitahuan oleh admin
-  async deleteAnnouncement(announcementId: string): Promise<boolean> {
-    const STORAGE_KEY = 'ascend_app_announcements_cache';
-    try {
-      const cached = localStorage.getItem(STORAGE_KEY);
-      if (cached) {
-        const list: AppAnnouncement[] = JSON.parse(cached);
-        const filtered = list.filter((a) => a.id !== announcementId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-      } else {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-      }
-      window.dispatchEvent(new Event('ascend-announcements-read-updated'));
-    } catch (e) {
-      console.warn('Gagal update cache lokal saat delete:', e);
-    }
+  // Simpan / Buat pemberitahuan baru oleh admin
+  async upsertAnnouncement(announcement: AppAnnouncement): Promise<boolean> {
+    const res = await this.upsertAnnouncementWithStatus(announcement);
+    return res.success;
+  },
 
+  // Hapus pemberitahuan langsung di Supabase dengan status hasil jujur
+  async deleteAnnouncementWithStatus(announcementId: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured()) {
-      return true;
+      return { success: false, error: 'Konfigurasi Supabase belum aktif.' };
     }
 
     try {
       const client = getSupabase();
       const { error } = await client.from('announcements').delete().eq('id', announcementId);
       if (error) {
-        console.warn('Gagal menghapus pemberitahuan di Supabase (dihapus dari lokal):', error.message || error);
+        return { success: false, error: error.message };
       }
+
+      try {
+        const STORAGE_KEY = 'ascend_app_announcements_cache';
+        const cached = localStorage.getItem(STORAGE_KEY);
+        if (cached) {
+          const list: AppAnnouncement[] = JSON.parse(cached);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(list.filter((a) => a.id !== announcementId)));
+        }
+      } catch {}
+
+      window.dispatchEvent(new Event('ascend-announcements-updated'));
+      window.dispatchEvent(new Event('ascend-announcements-read-updated'));
+      return { success: true };
     } catch (err: any) {
-      console.warn('Delete announcement in Supabase error (handled locally):', err?.message || err);
+      return { success: false, error: err?.message || 'Gagal menghapus pemberitahuan di Supabase.' };
     }
-    return true;
+  },
+
+  // Hapus pemberitahuan oleh admin
+  async deleteAnnouncement(announcementId: string): Promise<boolean> {
+    const res = await this.deleteAnnouncementWithStatus(announcementId);
+    return res.success;
   },
 
   // Unggah foto profil ke Supabase Storage (bucket 'profiles' private) dengan fallback DataURL
@@ -1625,12 +1735,11 @@ export const dbService = {
     }).eq('id', userId);
   },
 
-  // Periksa status ketersediaan tabel di database Supabase
+  // Periksa status ketersediaan & jumlah baris setiap tabel di database Supabase secara jujur
   async checkTablesStatus(): Promise<{
     allExist: boolean;
-    tables: Record<string, { exists: boolean; label: string; error?: string }>;
+    tables: Record<string, { exists: boolean; accessible: boolean; label: string; count: number | null; error?: string }>;
   }> {
-    const client = getSupabase();
     const tableConfigs = [
       { key: 'journals', label: 'Catatan Jurnal Harian (journals)' },
       { key: 'user_profiles', label: 'Profil & Streak Pengguna (user_profiles)' },
@@ -1644,25 +1753,375 @@ export const dbService = {
       { key: 'pdf_reports', label: 'Arsip Laporan PDF Bulanan (pdf_reports)' },
     ];
 
-    const tables: Record<string, { exists: boolean; label: string; error?: string }> = {};
+    const tables: Record<string, { exists: boolean; accessible: boolean; label: string; count: number | null; error?: string }> = {};
+
+    if (!isSupabaseConfigured()) {
+      tableConfigs.forEach(({ key, label }) => {
+        tables[key] = {
+          exists: false,
+          accessible: false,
+          label,
+          count: null,
+          error: 'Konfigurasi Supabase belum aktif.',
+        };
+      });
+      return { allExist: false, tables };
+    }
+
+    const client = getSupabase();
 
     await Promise.all(
       tableConfigs.map(async ({ key, label }) => {
         try {
-          const { error } = await client.from(key).select('*').limit(1);
-          if (error && error.code === 'PGRST205') {
-            tables[key] = { exists: false, label, error: error.message };
+          const { count, error } = await client.from(key).select('*', { count: 'exact', head: true });
+          if (error) {
+            const msg = error.message || '';
+            const isMissing =
+              error.code === 'PGRST205' ||
+              error.code === '42P01' ||
+              msg.includes('does not exist') ||
+              msg.includes('schema cache') ||
+              msg.includes('Could not find');
+            tables[key] = {
+              exists: !isMissing,
+              accessible: false,
+              label,
+              count: null,
+              error: msg || 'Gagal mengakses tabel',
+            };
           } else {
-            tables[key] = { exists: true, label };
+            tables[key] = {
+              exists: true,
+              accessible: true,
+              label,
+              count: typeof count === 'number' ? count : 0,
+            };
           }
         } catch (err: any) {
-          tables[key] = { exists: false, label, error: err?.message || 'Gagal memeriksa' };
+          tables[key] = {
+            exists: false,
+            accessible: false,
+            label,
+            count: null,
+            error: err?.message || 'Gagal memeriksa tabel',
+          };
         }
       })
     );
 
     const allExist = Object.values(tables).every((t) => t.exists);
     return { allExist, tables };
+  },
+
+  // Ambil seluruh data Portal Administrator secara murni dari query Supabase (tanpa mock / localStorage fallback)
+  async fetchAdminPortalOverview(): Promise<{
+    configured: boolean;
+    latencyMs: number | null;
+    sessionVerified: boolean;
+    sessionEmail: string | null;
+    sessionUserId: string | null;
+    allTablesOk: boolean;
+    tablesHealth: Record<string, { exists: boolean; accessible: boolean; label: string; count: number | null; error?: string }>;
+    totalDbRecords: number;
+    counts: {
+      totalUsers: number;
+      activeUsers: number;
+      agendasTotal: number;
+      agendasActive: number;
+      agendasCompleted: number;
+      habitsTotal: number;
+      journalsTotal: number;
+      walletsTotal: number;
+      walletTransactionsTotal: number;
+      targetsTotal: number;
+      calendarEventsTotal: number;
+      announcementsTotal: number;
+      feedbacksTotal: number;
+      pdfReportsTotal: number;
+    };
+    userProfiles: Array<{
+      id: string;
+      email: string | null;
+      full_name: string | null;
+      avatar_url: string | null;
+      streak_days: number;
+      last_streak_date: string | null;
+      first_app_open_at: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+      has_feedback: boolean;
+    }>;
+    profilesError?: string;
+    announcements: AppAnnouncement[];
+    announcementsError?: string;
+    auditEvents: Array<{
+      id: string;
+      action: string;
+      category: 'user' | 'announcement' | 'feedback' | 'report' | 'security' | 'database';
+      details: string;
+      timestamp: string;
+      actor: string;
+      sourceTable: string;
+    }>;
+    systemErrors: string[];
+  }> {
+    if (!isSupabaseConfigured()) {
+      const offlineTables = await this.checkTablesStatus();
+      return {
+        configured: false,
+        latencyMs: null,
+        sessionVerified: false,
+        sessionEmail: null,
+        sessionUserId: null,
+        allTablesOk: false,
+        tablesHealth: offlineTables.tables,
+        totalDbRecords: 0,
+        counts: {
+          totalUsers: 0,
+          activeUsers: 0,
+          agendasTotal: 0,
+          agendasActive: 0,
+          agendasCompleted: 0,
+          habitsTotal: 0,
+          journalsTotal: 0,
+          walletsTotal: 0,
+          walletTransactionsTotal: 0,
+          targetsTotal: 0,
+          calendarEventsTotal: 0,
+          announcementsTotal: 0,
+          feedbacksTotal: 0,
+          pdfReportsTotal: 0,
+        },
+        userProfiles: [],
+        profilesError: 'Konfigurasi Supabase belum aktif.',
+        announcements: [],
+        announcementsError: 'Konfigurasi Supabase belum aktif.',
+        auditEvents: [],
+        systemErrors: ['Konfigurasi Supabase belum terhubung pada aplikasi ini.'],
+      };
+    }
+
+    const startTime = Date.now();
+    const client = getSupabase();
+    const systemErrors: string[] = [];
+
+    const [
+      sessionRes,
+      tablesStatus,
+      profilesRes,
+      announcementsRes,
+      feedbacksRes,
+      agendasActiveRes,
+      agendasDoneRes,
+      walletsRes,
+      pdfReportsRes,
+    ] = await Promise.all([
+      client.auth.getSession().catch((err: any) => ({ data: { session: null }, error: err })),
+      this.checkTablesStatus(),
+      client
+        .from('user_profiles')
+        .select('id, email, full_name, avatar_url, streak_days, last_streak_date, first_app_open_at, created_at, updated_at, feedback')
+        .order('created_at', { ascending: false }),
+      this.fetchAnnouncementsWithStatus(false),
+      this.fetchAllUserFeedbacksWithStatus(),
+      client.from('agendas').select('*', { count: 'exact', head: true }).eq('is_completed', false),
+      client.from('agendas').select('*', { count: 'exact', head: true }).eq('is_completed', true),
+      client.from('wallets').select('id, transactions, updated_at'),
+      client
+        .from('pdf_reports')
+        .select('id, file_name, status, error_log, created_at, user_id')
+        .order('created_at', { ascending: false })
+        .limit(20),
+    ]);
+
+    const latencyMs = Date.now() - startTime;
+    const typedTablesHealth = tablesStatus.tables as Record<
+      string,
+      { exists: boolean; accessible: boolean; label: string; count: number | null; error?: string }
+    >;
+
+    Object.entries(typedTablesHealth).forEach(([tblKey, tblInfo]) => {
+      if (!tblInfo.exists) {
+        systemErrors.push(`Tabel "${tblKey}" belum tersedia di Supabase${tblInfo.error ? `: ${tblInfo.error}` : ''}`);
+      } else if (!tblInfo.accessible && tblInfo.error) {
+        systemErrors.push(`Akses tabel "${tblKey}" terkendala: ${tblInfo.error}`);
+      }
+    });
+
+    const sessionUser = sessionRes?.data?.session?.user || null;
+    const sessionVerified = Boolean(sessionRes?.data?.session && sessionUser?.id);
+
+    if (profilesRes.error) {
+      systemErrors.push(`user_profiles: ${profilesRes.error.message}`);
+    }
+    if (announcementsRes.error) {
+      systemErrors.push(`announcements: ${announcementsRes.error}`);
+    }
+    if (feedbacksRes.errorMessage) {
+      systemErrors.push(feedbacksRes.errorMessage);
+    }
+    if (agendasActiveRes.error && !typedTablesHealth.agendas?.error) {
+      systemErrors.push(`agendas: ${agendasActiveRes.error.message}`);
+    }
+    if (walletsRes.error && !typedTablesHealth.wallets?.error) {
+      systemErrors.push(`wallets: ${walletsRes.error.message}`);
+    }
+    if (pdfReportsRes.error && !typedTablesHealth.pdf_reports?.error) {
+      systemErrors.push(`pdf_reports: ${pdfReportsRes.error.message}`);
+    }
+
+    const rawProfiles = Array.isArray(profilesRes.data) ? profilesRes.data : [];
+    const userProfiles = rawProfiles.map((row: any) => ({
+      id: row.id,
+      email: typeof row.email === 'string' && row.email.trim() ? row.email.trim() : null,
+      full_name: typeof row.full_name === 'string' && row.full_name.trim() ? row.full_name.trim() : null,
+      avatar_url: typeof row.avatar_url === 'string' && row.avatar_url.trim() ? row.avatar_url.trim() : null,
+      streak_days: typeof row.streak_days === 'number' && Number.isFinite(row.streak_days) ? row.streak_days : 0,
+      last_streak_date: row.last_streak_date || null,
+      first_app_open_at: row.first_app_open_at || null,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      has_feedback: Boolean(row.feedback && (row.feedback.rating || row.feedback.suggestions)),
+    }));
+
+    const walletTransactionsTotal = Array.isArray(walletsRes.data)
+      ? walletsRes.data.reduce((acc: number, row: any) => {
+          return acc + (Array.isArray(row?.transactions) ? row.transactions.length : 0);
+        }, 0)
+      : 0;
+
+    const totalDbRecords: number = Object.values(typedTablesHealth).reduce((sum, tbl) => {
+      return sum + (typeof tbl.count === 'number' ? tbl.count : 0);
+    }, 0);
+
+    const activeUsers = userProfiles.filter((u) => u.streak_days > 0).length;
+
+    const counts = {
+      totalUsers: typedTablesHealth.user_profiles?.count ?? userProfiles.length,
+      activeUsers,
+      agendasTotal: typedTablesHealth.agendas?.count ?? 0,
+      agendasActive: typeof agendasActiveRes.count === 'number' ? agendasActiveRes.count : 0,
+      agendasCompleted: typeof agendasDoneRes.count === 'number' ? agendasDoneRes.count : 0,
+      habitsTotal: typedTablesHealth.habits?.count ?? 0,
+      journalsTotal: typedTablesHealth.journals?.count ?? 0,
+      walletsTotal: typedTablesHealth.wallets?.count ?? 0,
+      walletTransactionsTotal,
+      targetsTotal: typedTablesHealth.targets?.count ?? 0,
+      calendarEventsTotal: typedTablesHealth.calendar_events?.count ?? 0,
+      announcementsTotal: typedTablesHealth.announcements?.count ?? announcementsRes.announcements.length,
+      feedbacksTotal: typedTablesHealth.user_feedbacks?.count ?? feedbacksRes.feedbacks.length,
+      pdfReportsTotal: typedTablesHealth.pdf_reports?.count ?? 0,
+    };
+
+    // Bangun riwayat aktivitas audit 100% dari baris data asli di tabel Supabase
+    const auditEvents: Array<{
+      id: string;
+      action: string;
+      category: 'user' | 'announcement' | 'feedback' | 'report' | 'security' | 'database';
+      details: string;
+      timestamp: string;
+      actor: string;
+      sourceTable: string;
+    }> = [];
+
+    userProfiles.forEach((u) => {
+      const actor = u.email || u.full_name || `ID: ${u.id.slice(0, 8)}`;
+      if (u.created_at) {
+        auditEvents.push({
+          id: `profile-created-${u.id}`,
+          action: 'Registrasi Profil Pengguna',
+          category: 'user',
+          details: `Akun ${u.full_name || 'Tanpa nama'} (${u.email || '-'}) tercatat di tabel user_profiles.`,
+          timestamp: u.created_at,
+          actor,
+          sourceTable: 'user_profiles',
+        });
+      }
+      if (u.updated_at && u.updated_at !== u.created_at) {
+        auditEvents.push({
+          id: `profile-updated-${u.id}-${u.updated_at}`,
+          action: 'Pembaruan Data Profil & Streak',
+          category: 'user',
+          details: `Profil ${u.full_name || 'Tanpa nama'} diperbarui (Streak saat ini: ${u.streak_days} hari).`,
+          timestamp: u.updated_at,
+          actor,
+          sourceTable: 'user_profiles',
+        });
+      }
+    });
+
+    announcementsRes.announcements.forEach((ann) => {
+      const ts = ann.updatedAt || ann.createdAt;
+      if (ts) {
+        auditEvents.push({
+          id: `ann-${ann.id}-${ts}`,
+          action: ann.updatedAt && ann.updatedAt !== ann.createdAt ? 'Pembaruan Pemberitahuan' : 'Siaran Pemberitahuan',
+          category: 'announcement',
+          details: `Judul: "${ann.title || '-'}" (${ann.isActive ? 'Aktif' : 'Nonaktif'}).`,
+          timestamp: ts,
+          actor: ann.authorEmail || ann.authorName || '-',
+          sourceTable: 'announcements',
+        });
+      }
+    });
+
+    feedbacksRes.feedbacks.forEach((fb) => {
+      const ts = fb.updatedAt || fb.submittedAt;
+      if (ts) {
+        auditEvents.push({
+          id: `fb-${fb.id}-${ts}`,
+          action: `Penilaian Pengguna (${fb.rating}/5 Bintang)`,
+          category: 'feedback',
+          details: fb.suggestions
+            ? `Saran dari ${fb.fullName || 'Tanpa nama'}: "${fb.suggestions.slice(0, 120)}${fb.suggestions.length > 120 ? '...' : ''}"`
+            : `${fb.fullName || 'Tanpa nama'} mengirimkan penilaian ${fb.rating} bintang tanpa catatan teks.`,
+          timestamp: ts,
+          actor: fb.email || fb.fullName || `ID: ${fb.id.slice(0, 8)}`,
+          sourceTable: feedbacksRes.userFeedbacksTableExists ? 'user_feedbacks' : 'user_profiles',
+        });
+      }
+    });
+
+    if (Array.isArray(pdfReportsRes.data)) {
+      pdfReportsRes.data.forEach((rep: any) => {
+        if (rep?.error_log) {
+          systemErrors.push(`pdf_reports (${rep.file_name || rep.id}): ${rep.error_log}`);
+        }
+        if (rep?.created_at) {
+          auditEvents.push({
+            id: `pdf-${rep.id}`,
+            action: rep.error_log ? 'Log Error Arsip PDF' : 'Arsip Laporan PDF Bulanan',
+            category: rep.error_log ? 'database' : 'report',
+            details: rep.error_log
+              ? `File ${rep.file_name || rep.id}: ${rep.error_log}`
+              : `File ${rep.file_name || rep.id} tercatat dengan status "${rep.status || '-'}".`,
+            timestamp: rep.created_at,
+            actor: rep.user_id ? `User: ${String(rep.user_id).slice(0, 8)}` : '-',
+            sourceTable: 'pdf_reports',
+          });
+        }
+      });
+    }
+
+    auditEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    return {
+      configured: true,
+      latencyMs,
+      sessionVerified,
+      sessionEmail: sessionUser?.email || null,
+      sessionUserId: sessionUser?.id || null,
+      allTablesOk: tablesStatus.allExist,
+      tablesHealth: typedTablesHealth,
+      totalDbRecords,
+      counts,
+      userProfiles,
+      profilesError: profilesRes.error?.message,
+      announcements: announcementsRes.announcements,
+      announcementsError: announcementsRes.error,
+      auditEvents: auditEvents.slice(0, 60),
+      systemErrors,
+    };
   },
 
   // Jalankan migrasi via endpoint backend server

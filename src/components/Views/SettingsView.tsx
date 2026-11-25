@@ -25,7 +25,9 @@ import {
   requestNotificationPermission, 
   getNotificationSettings, 
   saveNotificationSettings, 
-  sendHabitTestNotification,
+  sendTestNotification,
+  isWebNotificationSupported,
+  isIOSNotStandalone,
   DeviceNotificationSettings 
 } from '../../utils/notifications';
 
@@ -95,61 +97,120 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isTestingNotif, setIsTestingNotif] = useState(false);
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    const syncState = () => {
+      setPermissionStatus(getNotificationPermissionStatus());
+      setNotifSettings(getNotificationSettings());
+    };
+    window.addEventListener('focus', syncState);
+    window.addEventListener('ascend-notification-settings-updated', syncState);
+    return () => {
+      window.removeEventListener('focus', syncState);
+      window.removeEventListener('ascend-notification-settings-updated', syncState);
+    };
+  }, []);
+
+  const isAgendaNotifActive = notifSettings.enabled && (notifSettings.agendaReminders || notifSettings.agendaPreCutoffReminder);
   const isHabitNotifActive = notifSettings.enabled && notifSettings.habitReminders === true;
   const isTargetNotifActive = notifSettings.enabled && notifSettings.targetReminders === true;
 
-  const handleToggleHabitNotification = () => {
+  const ensureBrowserPermissionOnToggle = async (enabling: boolean) => {
+    if (!enabling) return;
+    if (getNotificationPermissionStatus() === 'default') {
+      const res = await requestNotificationPermission();
+      setPermissionStatus(getNotificationPermissionStatus());
+      if (res === 'denied') {
+        setNotifFeedback('Izin notifikasi ditolak browser. Buka setelan situs peramban untuk mengizinkan.');
+        setTimeout(() => setNotifFeedback(null), 4000);
+      }
+    }
+  };
+
+  const handleToggleAgendaNotification = () => {
+    const nextVal = !isAgendaNotifActive;
+    const saved = saveNotificationSettings({
+      ...notifSettings,
+      enabled: nextVal ? true : notifSettings.enabled,
+      agendaReminders: nextVal,
+      agendaPreCutoffReminder: nextVal,
+    });
+    setNotifSettings(saved);
+  };
+
+  const handleToggleHabitNotification = async () => {
     const nextVal = !isHabitNotifActive;
-    const updated = {
+    const saved = saveNotificationSettings({
       ...notifSettings,
       enabled: nextVal ? true : notifSettings.enabled,
       habitReminders: nextVal,
-    };
-    const saved = saveNotificationSettings(updated);
+    });
     setNotifSettings(saved);
+    await ensureBrowserPermissionOnToggle(nextVal);
   };
 
-  const handleToggleTargetNotification = () => {
+  const handleToggleTargetNotification = async () => {
     const nextVal = !isTargetNotifActive;
-    const updated = {
+    const saved = saveNotificationSettings({
       ...notifSettings,
       enabled: nextVal ? true : notifSettings.enabled,
       targetReminders: nextVal,
-    };
-    const saved = saveNotificationSettings(updated);
+    });
     setNotifSettings(saved);
+    await ensureBrowserPermissionOnToggle(nextVal);
   };
 
   const handleRequestPermission = async () => {
+    if (!isWebNotificationSupported()) {
+      setNotifFeedback(
+        isIOSNotStandalone()
+          ? 'Di iPhone/iPad, ketuk Bagikan lalu "Tambahkan ke Layar Utama" terlebih dahulu agar notifikasi aktif.'
+          : 'Browser atau lingkungan ini belum mendukung Web Notification.'
+      );
+      setTimeout(() => setNotifFeedback(null), 5000);
+      return;
+    }
     const res = await requestNotificationPermission();
     setPermissionStatus(getNotificationPermissionStatus());
+    setNotifSettings(getNotificationSettings());
     if (res === 'granted') {
       setNotifFeedback('Izin notifikasi perangkat aktif!');
-      setTimeout(() => setNotifFeedback(null), 3000);
+      setTimeout(() => setNotifFeedback(null), 3500);
+    } else if (res === 'denied') {
+      setNotifFeedback('Izin notifikasi diblokir peramban. Aktifkan lewat ikon gembok/setelan situs browser Anda.');
+      setTimeout(() => setNotifFeedback(null), 4500);
     }
   };
 
   const handleTestDeviceNotification = async () => {
-    if (!isHabitNotifActive) {
-      setNotifFeedback('Sakelar pengingat sedang dinonaktifkan. Aktifkan sakelar di atas terlebih dahulu.');
-      setTimeout(() => setNotifFeedback(null), 4000);
+    if (!isWebNotificationSupported()) {
+      setNotifFeedback(
+        isIOSNotStandalone()
+          ? 'Tambahkan aplikasi ke Layar Utama iPhone/iPad agar notifikasi bisa dikirim.'
+          : 'Browser ini belum mendukung Web Notification.'
+      );
+      setTimeout(() => setNotifFeedback(null), 5000);
       return;
     }
+
     setIsTestingNotif(true);
     setNotifFeedback(null);
     try {
-      const ok = await sendHabitTestNotification('Rutinitas Kebiasaan', '4 jam 55 menit');
-      setPermissionStatus(getNotificationPermissionStatus());
+      const ok = await sendTestNotification();
+      const latestPerm = getNotificationPermissionStatus();
+      setPermissionStatus(latestPerm);
+      setNotifSettings(getNotificationSettings());
       if (ok) {
-        setNotifFeedback('Notifikasi pengingat kebiasaan (5 jam & 3 jam) berhasil terkirim ke HP / Laptop Anda!');
+        setNotifFeedback('Notifikasi uji coba berhasil dikirim ke HP / Laptop Anda!');
+      } else if (latestPerm === 'denied') {
+        setNotifFeedback('Izin notifikasi diblokir browser. Buka Setelan Situs di browser Anda untuk mengizinkan.');
       } else {
-        setNotifFeedback('Gagal mengirim notifikasi. Pastikan izin perangkat telah diizinkan.');
+        setNotifFeedback('Gagal mengirim notifikasi. Pastikan izin notifikasi perangkat telah disetujui.');
       }
     } catch (err: any) {
       setNotifFeedback(err?.message || 'Gagal mengirim notifikasi.');
     } finally {
       setIsTestingNotif(false);
-      setTimeout(() => setNotifFeedback(null), 4000);
+      setTimeout(() => setNotifFeedback(null), 4500);
     }
   };
 
@@ -575,6 +636,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 )}
               </div>
             )}
+
+            {/* SAKELAR PENGINGAT AGENDA HARIAN */}
+            <div className={`flex items-center justify-between gap-3 py-3 border-b ${
+              isLight ? 'border-slate-100' : 'border-white/5'
+            }`}>
+              <div className="flex-1 min-w-0 pr-2">
+                <div className="flex items-center gap-2">
+                  <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Pengingat Agenda &amp; Sebelum 22.00 (Dalam Aplikasi)
+                  </h4>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                    isAgendaNotifActive
+                      ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30'
+                      : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                  }`}>
+                    {isAgendaNotifActive ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleAgendaNotification}
+                aria-label="Aktifkan pengingat agenda harian"
+                className={`w-12 h-6 min-w-[48px] max-w-[48px] shrink-0 rounded-full transition-colors relative cursor-pointer focus:outline-none ${
+                  isAgendaNotifActive ? 'bg-teal-500' : (isLight ? 'bg-slate-300' : 'bg-white/20')
+                }`}
+              >
+                <span className={`w-5 h-5 rounded-full bg-white shadow-sm absolute top-0.5 left-0.5 transition-transform duration-200 ${
+                  isAgendaNotifActive ? 'translate-x-6' : 'translate-x-0'
+                }`} />
+              </button>
+            </div>
 
             {/* SAKELAR PENGINGAT KEBIASAAN */}
             <div className={`flex items-center justify-between gap-3 py-3 border-b ${

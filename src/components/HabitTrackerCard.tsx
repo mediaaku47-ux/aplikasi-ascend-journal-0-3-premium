@@ -7,7 +7,8 @@ import {
   checkAndTriggerHabitDeadlineNotification, 
   sendHabitTestNotification, 
   getNotificationPermissionStatus, 
-  requestNotificationPermission 
+  requestNotificationPermission,
+  saveNotificationSettings,
 } from '../utils/notifications';
 
 interface HabitTrackerCardProps {
@@ -219,6 +220,9 @@ export const HabitTrackerCard: React.FC<HabitTrackerCardProps> = ({
   const handleRequestPermission = async () => {
     const perm = await requestNotificationPermission();
     setPermissionStatus(perm as any);
+    if (perm === 'granted') {
+      saveNotificationSettings({ enabled: true, habitReminders: true });
+    }
   };
 
   const handleTestNotification = async (habitTitle: string) => {

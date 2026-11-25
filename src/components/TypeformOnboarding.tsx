@@ -21,7 +21,9 @@ import { usePWAInstall } from '../hooks/usePWAInstall';
 import {
   getNotificationPermissionStatus,
   getMicrophoneAndCameraPermissionStatus,
+  hasPassedDevicePermissionsOnboarding,
   isWebNotificationSupported,
+  markDevicePermissionsOnboardingPassed,
   requestMicrophoneAndCameraPermissions,
   saveNotificationSettings,
   setDismissedPermissionPrompt,
@@ -118,8 +120,15 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
     } catch {}
   }, [theme]);
 
+  const [permissionsStepPassed, setPermissionsStepPassed] = useState<boolean>(() =>
+    hasPassedDevicePermissionsOnboarding()
+  );
+  const minStep = permissionsStepPassed ? 1 : 0;
+
   // Step 0: Notification Consent, Step 1: Nickname, Step 2: Focus (A/B/C/D), Step 3: Completion
-  const [step, setStep] = useState<number>(0);
+  const [step, setStep] = useState<number>(() =>
+    hasPassedDevicePermissionsOnboarding() ? 1 : 0
+  );
   const [direction, setDirection] = useState<1 | -1>(1);
 
   const [nickname, setNickname] = useState<string>(() =>
@@ -175,12 +184,12 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
   const goToStep = useCallback(
     (targetStep: number) => {
       clearAutoAdvanceTimer();
-      const clamped = Math.max(0, Math.min(TOTAL_FORM_STEPS - 1, targetStep));
+      const clamped = Math.max(minStep, Math.min(TOTAL_FORM_STEPS - 1, targetStep));
       if (clamped === step) return;
       setDirection(clamped > step ? 1 : -1);
       setStep(clamped);
     },
-    [clearAutoAdvanceTimer, step]
+    [clearAutoAdvanceTimer, minStep, step]
   );
 
   // Step 0 Handler: Request Native Browser Notification, Microphone, and Camera Permissions
@@ -192,9 +201,9 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
       getNotificationPermissionStatus();
 
     try {
+      // 1. Pemicu izin Notifikasi asli browser
       if (isWebNotificationSupported()) {
-        const result = await Notification.requestPermission();
-        finalPerm = result;
+        finalPerm = await Notification.requestPermission();
       } else {
         finalPerm = 'unsupported';
       }
@@ -202,6 +211,7 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
       finalPerm = getNotificationPermissionStatus();
     }
 
+    // 2. Pemicu izin Mikrofon ({ audio: true }) & Kamera ({ video: true }), lalu stop track segera
     const mediaResult = await requestMicrophoneAndCameraPermissions();
     setMicGranted(mediaResult.microphone);
     setCamGranted(mediaResult.camera);
@@ -218,10 +228,8 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
       targetReminders: granted,
     });
     setDismissedPermissionPrompt(!granted);
-
-    try {
-      localStorage.setItem('ascend_initial_permissions_prompted', 'true');
-    } catch {}
+    markDevicePermissionsOnboardingPassed();
+    setPermissionsStepPassed(true);
 
     setIsRequestingPermission(false);
     setDirection(1);
@@ -248,10 +256,8 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
       targetReminders: false,
     });
     setDismissedPermissionPrompt(true);
-
-    try {
-      localStorage.setItem('ascend_initial_permissions_prompted', 'true');
-    } catch {}
+    markDevicePermissionsOnboardingPassed();
+    setPermissionsStepPassed(true);
 
     setDirection(1);
     setStep(1);
@@ -391,7 +397,7 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
       }
 
       if (!isTypingInInput) {
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowUp') && step > 0) {
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowUp') && step > minStep) {
           e.preventDefault();
           goToStep(step - 1);
         } else if ((e.key === 'ArrowRight' || e.key === 'ArrowDown') && canGoForward) {
@@ -410,6 +416,7 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
     handleFinish,
     handleNicknameNext,
     handleSelectFocusOption,
+    minStep,
     primaryFocus,
     step,
   ]);
@@ -493,7 +500,7 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
       {/* Top Header Bar */}
       <header className="relative z-20 w-full max-w-5xl mx-auto px-5 sm:px-8 pt-6 pb-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 sm:gap-3 whitespace-nowrap shrink-0">
-          {step > 0 && (
+          {step > minStep && (
             <button
               type="button"
               onClick={() => goToStep(step - 1)}

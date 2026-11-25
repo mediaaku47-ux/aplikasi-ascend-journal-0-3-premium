@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import {
+  hasPassedDevicePermissionsOnboarding,
   isWebNotificationSupported,
   requestInitialDevicePermissions,
 } from '../utils/notifications';
@@ -14,11 +15,7 @@ export const DeviceNotificationPermissionPrompt: React.FC<DeviceNotificationPerm
 }) => {
   useEffect(() => {
     let cancelled = false;
-    let alreadyTriggered = false;
-
-    try {
-      alreadyTriggered = localStorage.getItem('ascend_initial_permissions_prompted') === 'true';
-    } catch {}
+    const alreadyTriggered = hasPassedDevicePermissionsOnboarding();
 
     const runPermissionRequests = () => {
       if (cancelled) return;

@@ -20,6 +20,7 @@ import {
   isIOSNotStandalone,
   getNotificationPermissionStatus,
   requestNotificationPermission,
+  saveNotificationSettings,
   sendTargetConfirmationNotification,
   sendTargetTestNotification,
 } from '../../utils/notifications';
@@ -594,11 +595,12 @@ export const TargetsView: React.FC<TargetsViewProps> = ({
       const latest = getNotificationPermissionStatus();
       setNotifPermission(latest);
       if (perm === 'granted') {
+        saveNotificationSettings({ enabled: true, targetReminders: true });
         const sent = await sendTargetTestNotification(newTitle.trim() || undefined);
         setNotifFeedback(
           sent
             ? 'Notifikasi aktif! Cek bilah notifikasi HP / perangkat Anda.'
-            : 'Izin notifikasi diaktifkan. Aktifkan sakelar Pengingat Target di Pengaturan jika ingin menerima pengingat.'
+            : 'Izin notifikasi diaktifkan. Pengingat target telah siap digunakan.'
         );
       } else if (perm === 'denied') {
         setNotifFeedback('Izin notifikasi ditolak. Aktifkan lewat Setelan Situs browser Anda.');

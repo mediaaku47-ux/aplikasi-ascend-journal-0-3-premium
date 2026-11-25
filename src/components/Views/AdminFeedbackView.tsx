@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Copy,
   Check,
+  X,
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
 import { UserProfile } from '../../types';
@@ -55,107 +56,37 @@ export const AdminFeedbackView: React.FC<AdminFeedbackViewProps> = ({
   const [rlsRestrictedLikely, setRlsRestrictedLikely] = useState<boolean>(false);
   const [userFeedbacksTableExists, setUserFeedbacksTableExists] = useState<boolean>(true);
   const [sqlCopied, setSqlCopied] = useState<boolean>(false);
+  const [dismissedDiagnosticBanner, setDismissedDiagnosticBanner] = useState<boolean>(false);
 
-  const latestUserRef = useRef(currentUser);
-  const latestProfileRef = useRef(userProfile);
   const hasLoadedOnceRef = useRef(false);
 
-  useEffect(() => {
-    latestUserRef.current = currentUser;
-    latestProfileRef.current = userProfile;
-  }, [currentUser, userProfile]);
-
-  const buildLocalFeedbackRecord = useCallback((): UserFeedbackRecord | null => {
-    const activeProfile = latestProfileRef.current;
-    const activeUser = latestUserRef.current;
-    let fb = activeProfile.feedback;
-
-    if (!fb || (!fb.rating && !fb.suggestions)) {
-      try {
-        const cached = localStorage.getItem('journalstream_app_feedback');
-        if (cached) {
-          fb = JSON.parse(cached);
-        }
-      } catch {}
-    }
-
-    if (!fb || (!fb.rating && !fb.suggestions)) return null;
-
-    const normalizedRating = Math.min(5, Math.max(1, Math.round(Number(fb.rating) || 5)));
-    return {
-      id: activeUser?.id || 'local-user',
-      email: activeUser?.email || 'kamalizudin36@gmail.com',
-      fullName: activeProfile.name || 'Pengguna Utama',
-      avatarUrl: activeProfile.avatarUrl,
-      rating: normalizedRating,
-      suggestions: fb.suggestions || '',
-      tags: Array.isArray(fb.tags) ? fb.tags : [],
-      submittedAt: fb.submittedAt || new Date().toISOString(),
-      updatedAt: fb.updatedAt || fb.submittedAt,
-      firstAppOpenAt: activeProfile.firstAppOpenAt,
-    };
-  }, []);
-
-  // Muat data feedback secara sinkron dari cloud & gabungkan dengan perubahan lokal terbaru
+  // Muat data feedback 100% langsung dari database Supabase tanpa fallback/mock lokal
   const loadFeedbacks = useCallback(async (showSkeleton = false) => {
     if (showSkeleton) {
       setIsLoading(true);
     }
     try {
-      const localRecord = buildLocalFeedbackRecord();
-
       if (isSupabaseConfigured() && hasSupabaseClient()) {
         const statusRes = await dbService.fetchAllUserFeedbacksWithStatus();
         setCloudDiagnosticError(statusRes.errorMessage || null);
         setRlsRestrictedLikely(statusRes.rlsRestrictedLikely);
         setUserFeedbacksTableExists(statusRes.userFeedbacksTableExists);
-
-        const merged = [...statusRes.feedbacks];
-
-        if (localRecord) {
-          const matchIndex = merged.findIndex(
-            (d) =>
-              d.id === localRecord.id ||
-              (localRecord.email && d.email && d.email.toLowerCase() === localRecord.email.toLowerCase())
-          );
-
-          if (matchIndex === -1) {
-            merged.unshift(localRecord);
-          } else {
-            const existing = merged[matchIndex];
-            const localTs = new Date(localRecord.updatedAt || localRecord.submittedAt || 0).getTime();
-            const cloudTs = new Date(existing.updatedAt || existing.submittedAt || 0).getTime();
-            if (localTs >= cloudTs) {
-              merged[matchIndex] = {
-                ...existing,
-                ...localRecord,
-                email: existing.email || localRecord.email,
-                avatarUrl: localRecord.avatarUrl || existing.avatarUrl,
-              };
-            }
-          }
-        }
-
-        merged.sort((a, b) => {
-          const timeA = new Date(a.updatedAt || a.submittedAt || 0).getTime();
-          const timeB = new Date(b.updatedAt || b.submittedAt || 0).getTime();
-          return timeB - timeA;
-        });
-
-        setFeedbacks(merged);
+        setFeedbacks(statusRes.feedbacks);
       } else {
         setCloudDiagnosticError('Konfigurasi Supabase belum terhubung pada sesi ini.');
         setRlsRestrictedLikely(false);
-        setFeedbacks(localRecord ? [localRecord] : []);
+        setUserFeedbacksTableExists(false);
+        setFeedbacks([]);
       }
     } catch (err: any) {
       console.warn('Error loading admin feedback:', err);
-      setCloudDiagnosticError(err?.message || 'Gagal membaca data ulasan dari cloud.');
+      setCloudDiagnosticError(err?.message || 'Gagal membaca data ulasan dari Supabase.');
+      setFeedbacks([]);
     } finally {
       hasLoadedOnceRef.current = true;
       setIsLoading(false);
     }
-  }, [buildLocalFeedbackRecord]);
+  }, []);
 
   const ADMIN_RLS_SQL_SNIPPET = `-- Jalankan di Supabase SQL Editor agar Admin dapat membaca semua saran & penilaian pengguna
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS email TEXT;
@@ -221,12 +152,12 @@ END $$;`;
     }
   };
 
-  // Sinkronisasi awal & saat feedback pengguna saat ini berubah
+  // Sinkronisasi awal & saat sesi akun berubah
   useEffect(() => {
     loadFeedbacks(!hasLoadedOnceRef.current);
-  }, [currentUser?.id, userProfile.feedback, loadFeedbacks]);
+  }, [currentUser?.id, loadFeedbacks]);
 
-  // Channel Realtime Cloud + listener event lokal/cross-tab + fokus tab + interval latar belakang
+  // Channel Realtime Cloud + fokus tab + interval latar belakang
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const triggerSilentRefresh = () => {
@@ -245,43 +176,28 @@ END $$;`;
       }
     );
 
-    const handleInstantFeedbackUpdate = () => {
-      loadFeedbacks(false);
-    };
-
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
         loadFeedbacks(false);
       }
     };
 
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'journalstream_app_feedback' || e.key === 'journalstream_user_profile') {
-        loadFeedbacks(false);
-      }
-    };
-
-    window.addEventListener('ascend-feedback-updated', handleInstantFeedbackUpdate);
-    window.addEventListener('ascend-feedback-synced', handleInstantFeedbackUpdate);
+    window.addEventListener('ascend-feedback-synced', triggerSilentRefresh);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    window.addEventListener('storage', handleStorageChange);
 
-    // Fallback sinkronisasi berkala setiap 10 detik agar data selalu konsisten
     const syncInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         loadFeedbacks(false);
       }
-    }, 10000);
+    }, 15000);
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       unsubscribeRealtime();
-      window.removeEventListener('ascend-feedback-updated', handleInstantFeedbackUpdate);
-      window.removeEventListener('ascend-feedback-synced', handleInstantFeedbackUpdate);
+      window.removeEventListener('ascend-feedback-synced', triggerSilentRefresh);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.removeEventListener('storage', handleStorageChange);
       clearInterval(syncInterval);
     };
   }, [loadFeedbacks]);
@@ -385,12 +301,12 @@ END $$;`;
     const headers = ['ID Pengguna', 'Nama Lengkap', 'Email', 'Bintang (Rating)', 'Label/Tags', 'Saran & Masukan', 'Waktu Kirim'];
     const rows = feedbacks.map((f) => [
       `"${f.id}"`,
-      `"${f.fullName.replace(/"/g, '""')}"`,
-      `"${f.email || ''}"`,
+      `"${(f.fullName.trim() || 'Tanpa nama').replace(/"/g, '""')}"`,
+      `"${f.email || '-'}"`,
       f.rating,
       `"${(f.tags || []).join(', ')}"`,
       `"${f.suggestions.replace(/"/g, '""')}"`,
-      `"${f.submittedAt || ''}"`,
+      `"${f.submittedAt || '-'}"`,
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -437,7 +353,7 @@ END $$;`;
                   <span>Panel Administrator</span>
                 </span>
                 <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-white/75 text-[11px]">
-                  {currentUser?.email || 'Akun Admin'}
+                  {currentUser?.email || '-'}
                 </span>
               </div>
               <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
@@ -519,7 +435,9 @@ END $$;`;
       )}
 
       {/* Banner Diagnostik Jujur bila RLS/Tabel Cloud Membatasi Pembacaan Ulasan Pengguna Lain */}
-      {!isLoading && (cloudDiagnosticError || (isSupabaseConfigured() && (rlsRestrictedLikely || !userFeedbacksTableExists))) && (
+      {!isLoading &&
+        !dismissedDiagnosticBanner &&
+        (cloudDiagnosticError || (isSupabaseConfigured() && (rlsRestrictedLikely || !userFeedbacksTableExists))) && (
         <div
           className={`rounded-2xl p-4 border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
             isLight
@@ -538,122 +456,149 @@ END $$;`;
               <p className={isLight ? 'text-amber-800' : 'text-amber-200/85'}>
                 {cloudDiagnosticError
                   ? `Detail: ${cloudDiagnosticError}.`
-                  : `Server hanya mengembalikan paling banyak 1 baris dari database cloud (${!userFeedbacksTableExists ? 'tabel user_feedbacks belum dibuat dan ' : ''}kebijakan RLS user_profiles di Supabase kemungkinan masih membatasi SELECT hanya ke milik sendiri). Jalankan SQL RLS Admin di Supabase SQL Editor agar penilaian dari akun pengguna lain langsung tampil di sini.`}
+                  : `Server belum mendeteksi akses penuh tabel ulasan (${!userFeedbacksTableExists ? 'tabel user_feedbacks belum terbaca dan ' : ''}kebijakan RLS user_profiles di Supabase kemungkinan masih membatasi SELECT hanya ke milik sendiri). Jalankan SQL RLS Admin di Supabase SQL Editor lalu tekan Muat Ulang.`}
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleCopyAdminRlsSql}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
-              isLight
-                ? 'bg-amber-900 hover:bg-amber-950 text-white'
-                : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
-            }`}
-          >
-            {sqlCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{sqlCopied ? 'SQL Tersalin' : 'Salin SQL RLS Admin'}</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleCopyAdminRlsSql}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
+                isLight
+                  ? 'bg-amber-900 hover:bg-amber-950 text-white'
+                  : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+              }`}
+            >
+              {sqlCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{sqlCopied ? 'SQL Tersalin' : 'Salin SQL RLS Admin'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedDiagnosticBanner(true)}
+              aria-label="Tutup pemberitahuan"
+              title="Tutup pemberitahuan"
+              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                isLight
+                  ? 'border-amber-300/80 text-amber-700 hover:bg-amber-100'
+                  : 'border-amber-400/30 text-amber-200 hover:bg-amber-500/20'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
-      {/* 3 Kartu Statistik Ringkas (Model Bersih Vertikal di Mobile, Grid di Layar Lebar) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
-        {/* Kartu 1: RATA-RATA PENILAIAN */}
-        <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
-          <span className={`text-[11px] font-bold uppercase tracking-wider block ${
-            isLight ? 'text-slate-500' : 'text-slate-400'
-          }`}>
-            RATA-RATA PENILAIAN
-          </span>
-          <div className="mt-2.5 flex items-baseline gap-1.5">
-            <span className={`text-3xl sm:text-4xl font-black tracking-tight tabular-nums ${
-              isLight ? 'text-slate-900' : 'text-white'
+      {/* 3 Kartu Statistik Ringkas (Skeleton Loading saat memuat) */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5" aria-busy="true" aria-label="Memuat ringkasan penilaian">
+          {[0, 1, 2].map((idx) => (
+            <div key={idx} className={`rounded-2xl p-5 space-y-3 ${cardBase}`}>
+              <div className={`h-3 w-32 rounded-md animate-pulse ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
+              <div className={`h-9 w-24 rounded-lg animate-pulse ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
+              <div className={`h-3.5 w-44 rounded-md animate-pulse ${isLight ? 'bg-slate-100' : 'bg-white/5'}`} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+          {/* Kartu 1: RATA-RATA PENILAIAN */}
+          <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
+            <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+              isLight ? 'text-slate-500' : 'text-slate-400'
             }`}>
-              {stats.average > 0 ? stats.average.toFixed(1) : '0.0'}
+              RATA-RATA PENILAIAN
             </span>
-            <span className={`text-sm font-semibold ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
-              / 5.0
-            </span>
+            <div className="mt-2.5 flex items-baseline gap-1.5">
+              <span className={`text-3xl sm:text-4xl font-black tracking-tight tabular-nums ${
+                isLight ? 'text-slate-900' : 'text-white'
+              }`}>
+                {stats.average > 0 ? stats.average.toFixed(1) : '0.0'}
+              </span>
+              <span className={`text-sm font-semibold ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
+                / 5.0
+              </span>
+            </div>
+            <div className="mt-2.5 flex items-center gap-1">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Star
+                  key={star}
+                  className={`w-4 h-4 ${
+                    star <= Math.round(stats.average)
+                      ? 'text-amber-400 fill-amber-400'
+                      : isLight
+                        ? 'text-slate-200 fill-slate-100'
+                        : 'text-white/15'
+                  }`}
+                />
+              ))}
+              <span className={`text-xs font-medium ml-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                ({stats.total} ulasan)
+              </span>
+            </div>
           </div>
-          <div className="mt-2.5 flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <Star
-                key={star}
-                className={`w-4 h-4 ${
-                  star <= Math.round(stats.average)
-                    ? 'text-amber-400 fill-amber-400'
-                    : isLight
-                      ? 'text-slate-200 fill-slate-100'
-                      : 'text-white/15'
-                }`}
-              />
-            ))}
-            <span className={`text-xs font-medium ml-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              ({stats.total} ulasan)
-            </span>
-          </div>
-        </div>
 
-        {/* Kartu 2: TINGKAT KEPUASAN */}
-        <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
-          <span className={`text-[11px] font-bold uppercase tracking-wider block ${
-            isLight ? 'text-slate-500' : 'text-slate-400'
-          }`}>
-            TINGKAT KEPUASAN
-          </span>
-          <div className="mt-2.5">
-            <span className="text-3xl sm:text-4xl font-black tracking-tight text-emerald-500 tabular-nums">
-              {stats.satisfactionPct}%
+          {/* Kartu 2: TINGKAT KEPUASAN */}
+          <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
+            <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+              isLight ? 'text-slate-500' : 'text-slate-400'
+            }`}>
+              TINGKAT KEPUASAN
             </span>
+            <div className="mt-2.5">
+              <span className="text-3xl sm:text-4xl font-black tracking-tight text-emerald-500 tabular-nums">
+                {stats.satisfactionPct}%
+              </span>
+            </div>
+            <p className={`mt-2.5 text-xs font-medium flex items-center gap-1.5 ${
+              isLight ? 'text-slate-600' : 'text-slate-300'
+            }`}>
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span>
+                {stats.satisfiedCount} dari {stats.total} pengguna memberi bintang 4 atau 5
+              </span>
+            </p>
           </div>
-          <p className={`mt-2.5 text-xs font-medium flex items-center gap-1.5 ${
-            isLight ? 'text-slate-600' : 'text-slate-300'
-          }`}>
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span>
-              {stats.satisfiedCount} dari {stats.total} pengguna memberi bintang 4 atau 5
-            </span>
-          </p>
-        </div>
 
-        {/* Kartu 3: DISTRIBUSI BINTANG */}
-        <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
-          <span className={`text-[11px] font-bold uppercase tracking-wider block mb-3 ${
-            isLight ? 'text-slate-500' : 'text-slate-400'
-          }`}>
-            DISTRIBUSI BINTANG
-          </span>
-          <div className="space-y-2">
-            {starDistributionRows.map(({ star, count }) => {
-              const pct = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
-              return (
-                <div key={star} className="flex items-center gap-2.5">
-                  <div className="flex items-center gap-1 w-7 shrink-0">
-                    <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-slate-700' : 'text-slate-200'}`}>
-                      {star}
+          {/* Kartu 3: DISTRIBUSI BINTANG */}
+          <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
+            <span className={`text-[11px] font-bold uppercase tracking-wider block mb-3 ${
+              isLight ? 'text-slate-500' : 'text-slate-400'
+            }`}>
+              DISTRIBUSI BINTANG
+            </span>
+            <div className="space-y-2">
+              {starDistributionRows.map(({ star, count }) => {
+                const pct = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
+                return (
+                  <div key={star} className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-1 w-7 shrink-0">
+                      <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-slate-700' : 'text-slate-200'}`}>
+                        {star}
+                      </span>
+                      <Star className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
+                    </div>
+                    <div className={`flex-1 h-2 rounded-full overflow-hidden ${
+                      isLight ? 'bg-slate-100' : 'bg-white/10'
+                    }`}>
+                      <div
+                        className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className={`text-xs font-semibold w-5 text-right tabular-nums ${
+                      isLight ? 'text-slate-600' : 'text-slate-300'
+                    }`}>
+                      {count}
                     </span>
-                    <Star className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
                   </div>
-                  <div className={`flex-1 h-2 rounded-full overflow-hidden ${
-                    isLight ? 'bg-slate-100' : 'bg-white/10'
-                  }`}>
-                    <div
-                      className="h-full rounded-full bg-amber-400 transition-all duration-500"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className={`text-xs font-semibold w-5 text-right tabular-nums ${
-                    isLight ? 'text-slate-600' : 'text-slate-300'
-                  }`}>
-                    {count}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Kartu Pencarian */}
       <div className={`rounded-2xl p-4 transition-all ${cardBase}`}>
@@ -741,7 +686,15 @@ END $$;`;
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {filteredFeedbacks.map((fb) => (
+            {filteredFeedbacks.map((fb) => {
+              const displayName = fb.fullName.trim() || 'Tanpa nama';
+              const displayInitial = fb.fullName.trim()
+                ? fb.fullName.trim().charAt(0).toUpperCase()
+                : fb.email
+                  ? fb.email.charAt(0).toUpperCase()
+                  : '?';
+
+              return (
               <div
                 key={fb.id}
                 className={`p-4 sm:p-5 rounded-2xl transition-all flex flex-col justify-between ${cardBase}`}
@@ -753,7 +706,7 @@ END $$;`;
                       {fb.avatarUrl ? (
                         <img
                           src={fb.avatarUrl}
-                          alt={fb.fullName}
+                          alt={displayName}
                           referrerPolicy="no-referrer"
                           className={`w-10 h-10 rounded-xl object-cover border shrink-0 ${
                             isLight ? 'border-slate-200' : 'border-white/15'
@@ -765,18 +718,16 @@ END $$;`;
                             ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                             : 'bg-teal-500/15 border-teal-500/30 text-teal-300'
                         }`}>
-                          {fb.fullName.charAt(0).toUpperCase()}
+                          {displayInitial}
                         </div>
                       )}
                       <div className="min-w-0">
                         <h4 className={`text-sm font-bold truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                          {fb.fullName}
+                          {displayName}
                         </h4>
-                        {fb.email && (
-                          <p className={`text-[11px] truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                            {fb.email}
-                          </p>
-                        )}
+                        <p className={`text-[11px] truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                          {fb.email || '-'}
+                        </p>
                       </div>
                     </div>
 
@@ -876,7 +827,8 @@ END $$;`;
                   </span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

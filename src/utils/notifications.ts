@@ -119,6 +119,7 @@ export function saveNotificationSettings(settings: Partial<DeviceNotificationSet
     const current = getNotificationSettings();
     const updated = { ...current, ...settings };
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new Event('ascend-notification-settings-updated'));
     return updated;
   } catch {
     return DEFAULT_NOTIFICATION_SETTINGS;
@@ -135,6 +136,15 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
       setDismissedPermissionPrompt(false);
+      const current = getNotificationSettings();
+      // Pastikan master switch aktif kembali jika pengguna sebelumnya melewati onboarding
+      if (!current.enabled) {
+        saveNotificationSettings({
+          enabled: true,
+          agendaReminders: true,
+          agendaPreCutoffReminder: true,
+        });
+      }
     }
     return permission;
   } catch (e) {
@@ -171,49 +181,34 @@ export async function sendDeviceNotification(
     ...options,
   };
 
-  // 1. Coba utamakan Service Worker aktif (Wajib untuk HP Android / iOS PWA mobile & desktop tray)
+  // 1. Coba Service Worker aktif apabila sudah siap & terpasang di origin
   if ('serviceWorker' in navigator) {
     try {
       let reg: ServiceWorkerRegistration | null = (await navigator.serviceWorker.getRegistration()) || null;
       if (!reg) {
-        try {
-          reg = await navigator.serviceWorker.register('/sw.js');
-        } catch {
-          reg = null;
-        }
-      }
-      if (!reg || !reg.active) {
-        const readyReg = await Promise.race([
+        reg = await Promise.race([
           navigator.serviceWorker.ready,
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
         ]);
-        if (readyReg) reg = readyReg;
       }
 
       if (reg && reg.active && typeof reg.showNotification === 'function') {
         await reg.showNotification(title, notificationOptions);
         return true;
       }
-
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({
-          type: 'SHOW_DEVICE_NOTIFICATION',
-          title,
-          options: notificationOptions,
-        });
-        return true;
-      }
     } catch (swErr) {
-      console.warn('SW notification dispatch notice:', swErr);
+      console.warn('SW showNotification notice, fallback ke window.Notification:', swErr);
     }
   }
 
-  // 2. Fallback ke window.Notification langsung (Laptop / Desktop browser)
+  // 2. Fallback ke window.Notification langsung (Laptop / Desktop / Preview iframe)
   try {
     const notif = new Notification(title, notificationOptions);
     notif.onclick = () => {
-      window.focus();
-      notif.close();
+      try {
+        window.focus();
+        notif.close();
+      } catch {}
     };
     return true;
   } catch (err) {
@@ -226,15 +221,21 @@ export async function sendDeviceNotification(
  * Kirim notifikasi uji coba seketika ke HP / Laptop untuk memverifikasi izin resmi
  */
 export async function sendTestNotification(): Promise<boolean> {
+  if (!isWebNotificationSupported()) return false;
   const perm = getNotificationPermissionStatus();
   if (perm !== 'granted') {
     const requested = await requestNotificationPermission();
     if (requested !== 'granted') return false;
   }
 
+  const current = getNotificationSettings();
+  if (!current.enabled) {
+    saveNotificationSettings({ enabled: true });
+  }
+
   return sendDeviceNotification('🔔 Notifikasi ASCEND Terhubung!', {
-    body: 'Notifikasi perangkat Anda aktif. Anda akan menerima pengingat agenda sebelum pukul 22.00 dan peringatan batas pengisian jurnal.',
-    tag: 'ascend-test-notification',
+    body: 'Notifikasi perangkat Anda aktif. Anda akan menerima pengingat kebiasaan, batas target, dan tutup bulan langsung di perangkat.',
+    tag: `ascend-test-notification-${Date.now()}`,
   });
 }
 
@@ -275,8 +276,39 @@ const STORAGE_REMINDER_PRE22_KEY = 'ascend_agenda_pre22_reminded_date';
 const STORAGE_REMINDER_AGENDA_KEY = 'ascend_agenda_reminded_date';
 const STORAGE_REMINDER_HABIT_KEY = 'ascend_habit_reminded_date';
 
-function getTodayDateString(date: Date = new Date()): string {
+export function getTodayDateString(date: Date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Cek apakah sebuah agenda berasal/dibuat pada tanggal targetIso (YYYY-MM-DD).
+ * Saat berganti hari pukul 00:00 malam, agenda hari sebelumnya otomatis tidak lagi dianggap hari ini.
+ */
+export function isTaskForDate(task: Task, targetIso: string = getTodayDateString()): boolean {
+  if (!task?.createdAt || typeof task.createdAt !== 'string') return false;
+  const raw = task.createdAt.trim();
+  if (!raw) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw === targetIso;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return getTodayDateString(parsed) === targetIso;
+}
+
+/**
+ * Cek apakah agenda aktif pada tanggal targetIso (dibuat pada hari ini atau hari sebelumnya dalam daftar agenda aktif).
+ */
+export function isTaskActiveUpToDate(task: Task, targetIso: string = getTodayDateString()): boolean {
+  if (!task?.createdAt || typeof task.createdAt !== 'string') return true;
+  const raw = task.createdAt.trim();
+  if (!raw) return true;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw <= targetIso;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return true;
+  return getTodayDateString(parsed) <= targetIso;
 }
 
 /**
@@ -308,64 +340,102 @@ export function triggerSystemJournalReminder(_remainingMinutes?: number): boolea
   return false;
 }
 
+export interface InAppAgendaReminder {
+  type: 'daily' | 'pre22';
+  title: string;
+  body: string;
+  message: string;
+  pendingCount: number;
+}
+
 /**
- * Pengingat Agenda Sebelum Pukul 22.00
- * Mengingatkan pengguna untuk menuntaskan agenda dan bersiap mengisi jurnal sebelum batas malam
+ * Pengingat Agenda Sebelum Pukul 22.00 (Hanya di dalam aplikasi, tidak dikirim ke layar HP/OS)
  */
-export function triggerPre22AgendaReminder(pendingCount: number, taskSample?: string): boolean {
+export function triggerPre22AgendaReminder(pendingCount: number, taskSample?: string): InAppAgendaReminder | null {
   const settings = getNotificationSettings();
-  if (!settings.enabled || !settings.agendaPreCutoffReminder) return false;
-  if (!isWebNotificationSupported() || Notification.permission !== 'granted') return false;
+  if (!settings.enabled || !settings.agendaPreCutoffReminder) return null;
 
   const todayStr = getTodayDateString();
-  if (localStorage.getItem(STORAGE_REMINDER_PRE22_KEY) === todayStr) return false;
-
   try {
+    if (localStorage.getItem(STORAGE_REMINDER_PRE22_KEY) === todayStr) return null;
+
     const title = '📋 Selesaikan Agenda Sebelum 22.00!';
     const body = taskSample
       ? `Masih ada ${pendingCount} agenda belum selesai (misal: "${taskSample}"). Selesaikan sebelum pukul 22.00 dan siapkan evaluasi jurnal Anda.`
       : `Anda memiliki ${pendingCount} agenda harian yang belum selesai hari ini. Selesaikan sebelum pukul 22.00 dan pantau perkembangan jurnal Anda!`;
 
-    sendDeviceNotification(title, {
-      body,
-      tag: `ascend-agenda-pre22-${todayStr}`,
-    });
-
     localStorage.setItem(STORAGE_REMINDER_PRE22_KEY, todayStr);
-    return true;
+    return {
+      type: 'pre22',
+      title,
+      body,
+      message: `${title} ${body}`,
+      pendingCount,
+    };
   } catch (err) {
-    console.warn('Gagal memicu Web Notification Agenda Pre-22:', err);
-    return false;
+    console.warn('Gagal memicu pengingat Agenda Pre-22 di aplikasi:', err);
+    return null;
   }
 }
 
 /**
- * Kirim Web Notification pengingat agenda & tugas umum (pagi/siang)
+ * Pengingat Agenda Harian (10.00 - 20.59, hanya di dalam aplikasi, tidak dikirim ke layar HP/OS)
  */
-export function triggerAgendaReminder(pendingCount: number, taskSample?: string): boolean {
+export function triggerAgendaReminder(pendingCount: number, taskSample?: string): InAppAgendaReminder | null {
   const settings = getNotificationSettings();
-  if (!settings.enabled || !settings.agendaReminders) return false;
-  if (!isWebNotificationSupported() || Notification.permission !== 'granted') return false;
+  if (!settings.enabled || !settings.agendaReminders) return null;
 
   const todayStr = getTodayDateString();
-  if (localStorage.getItem(STORAGE_REMINDER_AGENDA_KEY) === todayStr) return false;
-
   try {
+    if (localStorage.getItem(STORAGE_REMINDER_AGENDA_KEY) === todayStr) return null;
+
     const title = `📋 Pengingat Agenda: ${pendingCount} Tugas Belum Selesai`;
     const body = taskSample
       ? `Agenda hari ini: "${taskSample}" dan tugas lainnya menanti diselesaikan.`
       : `Anda memiliki ${pendingCount} agenda harian yang belum ditandai selesai hari ini.`;
 
-    sendDeviceNotification(title, {
-      body,
-      tag: `ascend-agenda-daily-${todayStr}`,
-    });
-
     localStorage.setItem(STORAGE_REMINDER_AGENDA_KEY, todayStr);
-    return true;
+    return {
+      type: 'daily',
+      title,
+      body,
+      message: `${title} — ${body}`,
+      pendingCount,
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * Pemeriksaan Global Agenda Harian (Khusus di dalam aplikasi, tidak dikirim ke layar HP)
+ * Memicu pengingat 1x/hari antara pukul 10.00 - 20.59 serta pengingat malam 1x/hari pukul 21.00 - 21.59
+ */
+export function checkAllAgendasForReminders(tasks: Task[], targetDay?: number): InAppAgendaReminder | null {
+  if (!tasks || !Array.isArray(tasks) || tasks.length === 0) return null;
+  const settings = getNotificationSettings();
+  if (!settings.enabled) return null;
+
+  const now = new Date();
+  const todayStr = getTodayDateString(now);
+  const dayNum = typeof targetDay === 'number' && targetDay >= 1 ? targetDay : now.getDate();
+  const todayTasks = tasks.filter((task) => isTaskActiveUpToDate(task, todayStr));
+  const pendingTasks = todayTasks.filter((task) => task.days?.[dayNum] !== 'done');
+  if (pendingTasks.length === 0) return null;
+
+  const hour = now.getHours();
+  const sampleTitle = pendingTasks[0]?.title;
+  const preCutoffHour = settings.agendaReminderHour ?? 21;
+
+  if (hour === preCutoffHour && settings.agendaPreCutoffReminder) {
+    return triggerPre22AgendaReminder(pendingTasks.length, sampleTitle);
+  }
+
+  if (hour >= 10 && hour < preCutoffHour && settings.agendaReminders) {
+    return triggerAgendaReminder(pendingTasks.length, sampleTitle);
+  }
+
+  return null;
 }
 
 /**
@@ -534,14 +604,16 @@ export function checkAllHabitsForDeadlineReminders(habits: Habit[]): void {
  * Uji coba notifikasi perangkat kebiasaan seketika ke HP / Laptop pengguna
  */
 export async function sendHabitTestNotification(habitTitle: string, countdownDetailed: string): Promise<boolean> {
-  const settings = getNotificationSettings();
-  if (!settings.enabled || !settings.habitReminders) {
-    return false;
-  }
+  if (!isWebNotificationSupported()) return false;
   const perm = getNotificationPermissionStatus();
   if (perm !== 'granted') {
     const requested = await requestNotificationPermission();
     if (requested !== 'granted') return false;
+  }
+
+  const settings = getNotificationSettings();
+  if (!settings.enabled) {
+    saveNotificationSettings({ enabled: true });
   }
 
   const title = `⏰ Pengingat: ${habitTitle}`;
@@ -849,15 +921,18 @@ export async function sendTargetConfirmationNotification(
  * Kirim notifikasi uji coba pengingat target ke HP / perangkat pengguna
  */
 export async function sendTargetTestNotification(sampleTitle?: string): Promise<boolean> {
-  const settings = getNotificationSettings();
-  if (!settings.enabled || !settings.targetReminders) {
-    return false;
-  }
+  if (!isWebNotificationSupported()) return false;
   const perm = getNotificationPermissionStatus();
   if (perm !== 'granted') {
     const requested = await requestNotificationPermission();
     if (requested !== 'granted') return false;
   }
+
+  const settings = getNotificationSettings();
+  if (!settings.enabled) {
+    saveNotificationSettings({ enabled: true });
+  }
+
   return sendDeviceNotification('🔔 Notifikasi Target HP & Perangkat Aktif!', {
     body: sampleTitle
       ? `Siap menyemangatimu! Pengingat untuk "${sampleTitle}" akan muncul langsung di perangkatmu agar kamu mencapai targetmu.`
@@ -867,7 +942,28 @@ export async function sendTargetTestNotification(sampleTitle?: string): Promise<
 }
 
 const INITIAL_PERMISSIONS_PROMPTED_KEY = 'ascend_initial_permissions_prompted';
+const DEVICE_PERMISSIONS_STEP_DONE_KEY = 'ascend_device_permissions_step_done';
 let isRequestingInitialPermissions = false;
+
+export function hasPassedDevicePermissionsOnboarding(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return (
+      localStorage.getItem(DEVICE_PERMISSIONS_STEP_DONE_KEY) === 'true' ||
+      localStorage.getItem(INITIAL_PERMISSIONS_PROMPTED_KEY) === 'true'
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function markDevicePermissionsOnboardingPassed(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(DEVICE_PERMISSIONS_STEP_DONE_KEY, 'true');
+    localStorage.setItem(INITIAL_PERMISSIONS_PROMPTED_KEY, 'true');
+  } catch {}
+}
 
 const stopMediaTracksSafe = (stream: MediaStream | null | undefined) => {
   if (!stream) return;
@@ -906,63 +1002,40 @@ export async function getMicrophoneAndCameraPermissionStatus(): Promise<{
 }
 
 /**
- * Meminta izin resmi browser untuk Mikrofon (Audio) dan Kamera (Video) secara aman,
- * lalu segera menghentikan track media agar indikator kamera/mikrofon tidak tetap menyala.
+ * Meminta izin resmi browser untuk Mikrofon ({ audio: true }) dan Kamera ({ video: true }),
+ * lalu segera menghentikan seluruh track media setelah izin diberikan agar hardware tidak menyala terus.
  */
 export async function requestMicrophoneAndCameraPermissions(): Promise<{
   microphone: boolean;
   camera: boolean;
 }> {
-  const initial = await getMicrophoneAndCameraPermissionStatus();
-  let micGranted = initial.microphone;
-  let camGranted = initial.camera;
+  let micGranted = false;
+  let camGranted = false;
 
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    return { microphone: micGranted, camera: camGranted };
+    return { microphone: false, camera: false };
   }
 
-  const needAudio = !micGranted;
-  const needCamera = !camGranted;
+  let audioStream: MediaStream | null = null;
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micGranted = true;
+  } catch {
+    micGranted = await isPermissionAlreadyGranted('microphone');
+  } finally {
+    stopMediaTracksSafe(audioStream);
+    audioStream = null;
+  }
 
-  if (needAudio || needCamera) {
-    let combinedStream: MediaStream | null = null;
-    try {
-      combinedStream = await navigator.mediaDevices.getUserMedia({
-        audio: needAudio,
-        video: needCamera,
-      });
-      if (needAudio) micGranted = true;
-      if (needCamera) camGranted = true;
-    } catch {
-      stopMediaTracksSafe(combinedStream);
-      combinedStream = null;
-
-      if (needAudio) {
-        let audioStream: MediaStream | null = null;
-        try {
-          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          micGranted = true;
-        } catch {
-          micGranted = false;
-        } finally {
-          stopMediaTracksSafe(audioStream);
-        }
-      }
-
-      if (needCamera) {
-        let videoStream: MediaStream | null = null;
-        try {
-          videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-          camGranted = true;
-        } catch {
-          camGranted = false;
-        } finally {
-          stopMediaTracksSafe(videoStream);
-        }
-      }
-    } finally {
-      stopMediaTracksSafe(combinedStream);
-    }
+  let videoStream: MediaStream | null = null;
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    camGranted = true;
+  } catch {
+    camGranted = await isPermissionAlreadyGranted('camera');
+  } finally {
+    stopMediaTracksSafe(videoStream);
+    videoStream = null;
   }
 
   try {
@@ -976,34 +1049,24 @@ export async function requestMicrophoneAndCameraPermissions(): Promise<{
 }
 
 /**
- * Langsung memunculkan dialog izin resmi browser untuk Notifikasi, Audio (Mikrofon), dan Kamera
- * saat pengguna baru masuk tanpa menampilkan kartu/modal perantara.
+ * Hanya memicu izin Notifikasi apabila langkah izin perangkat onboarding belum dilalui.
+ * Izin Mikrofon dan Kamera tidak pernah dipicu secara global di halaman lain, melainkan secara
+ * kontekstual hanya di fitur Catatan Suara dan Pindai Struk.
  */
 export async function requestInitialDevicePermissions(): Promise<void> {
   if (typeof window === 'undefined' || isRequestingInitialPermissions) return;
-
-  try {
-    if (localStorage.getItem(INITIAL_PERMISSIONS_PROMPTED_KEY) === 'true') {
-      return;
-    }
-  } catch {}
+  if (hasPassedDevicePermissionsOnboarding()) return;
 
   isRequestingInitialPermissions = true;
 
   try {
-    // 1. Langsung minta izin Notifikasi jika masih 'default'
     if (isWebNotificationSupported() && Notification.permission === 'default') {
       try {
         await Notification.requestPermission();
       } catch {}
     }
 
-    // 2. Langsung minta izin Audio (Mikrofon) & Kamera jika belum granted
-    await requestMicrophoneAndCameraPermissions();
-
-    try {
-      localStorage.setItem(INITIAL_PERMISSIONS_PROMPTED_KEY, 'true');
-    } catch {}
+    markDevicePermissionsOnboardingPassed();
   } finally {
     isRequestingInitialPermissions = false;
   }

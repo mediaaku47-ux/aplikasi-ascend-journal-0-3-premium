@@ -2,12 +2,55 @@ import { useState, useEffect, useCallback } from 'react';
 import { AuthScreen } from './components/AuthScreen';
 import { MainDashboard } from './components/MainDashboard';
 import { AppEntryChoiceModal } from './components/AppEntryChoiceModal';
-import { authService, dbService } from './lib/supabaseService';
+import { TypeformOnboarding, OnboardingResult } from './components/TypeformOnboarding';
+import { authService, dbService, isValidSupabaseUserId } from './lib/supabaseService';
 import { isSupabaseConfigured } from './lib/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
-import { UserProfile } from './types';
+import { OnboardingFocus, UserProfile } from './types';
+import { initialUserProfile } from './data/initialData';
+import { getRealToday } from './utils/dateUtils';
 import { CheckCircle2 } from 'lucide-react';
 import { usePWAInstall } from './hooks/usePWAInstall';
+import { markDevicePermissionsOnboardingPassed } from './utils/notifications';
+
+const ONBOARDING_DONE_KEY = 'ascend_typeform_onboarding_done';
+
+const getOnboardingStorageKey = (userId?: string): string => {
+  if (userId && userId !== 'local-default-user') {
+    return `${ONBOARDING_DONE_KEY}_${userId}`;
+  }
+  return ONBOARDING_DONE_KEY;
+};
+
+const getFocusGreetingSubtitle = (focus?: OnboardingFocus): string => {
+  switch (focus) {
+    case 'productivity':
+      return 'Fokus hari ini: atur agenda & tuntaskan target harian Anda.';
+    case 'habits':
+      return 'Fokus hari ini: jaga konsistensi rutinitas & streak kebiasaan Anda.';
+    case 'finance':
+      return 'Fokus hari ini: pantau pemasukan, pengeluaran, dan target tabungan.';
+    default:
+      return 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.';
+  }
+};
+
+const hasCompletedOnboardingForUser = (
+  user?: SupabaseUser | null,
+  profile?: UserProfile | null
+): boolean => {
+  if (user?.user_metadata?.onboarding_completed === true) return true;
+  if (profile?.onboardingCompleted === true) return true;
+
+  try {
+    const key = getOnboardingStorageKey(user?.id);
+    if (localStorage.getItem(key) === 'true') return true;
+  } catch {
+    // ignore storage errors
+  }
+
+  return false;
+};
 
 const getFallbackDefaultUser = (): SupabaseUser => {
   let createdAt = '';
@@ -60,6 +103,24 @@ export default function App() {
       return true;
     }
   });
+
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean>(() => {
+    try {
+      const hasCompletedWelcome =
+        localStorage.getItem('journalstream_has_completed_welcome') === 'true';
+      if (!hasCompletedWelcome) return false;
+
+      const cachedUserRaw = localStorage.getItem('journalstream_current_user');
+      const cachedProfileRaw = localStorage.getItem('journalstream_user_profile');
+      const parsedUser = cachedUserRaw ? (JSON.parse(cachedUserRaw) as SupabaseUser) : null;
+      const parsedProfile = cachedProfileRaw ? (JSON.parse(cachedProfileRaw) as UserProfile) : null;
+      return !hasCompletedOnboardingForUser(parsedUser, parsedProfile);
+    } catch {
+      return false;
+    }
+  });
+
+  const [pendingForceOnboarding, setPendingForceOnboarding] = useState<boolean>(false);
 
   const [openedViaInstallAction] = useState<boolean>(() => {
     try {
@@ -120,20 +181,24 @@ export default function App() {
         ).catch(() => null);
 
         if (isMounted && profile) {
-          setCurrentProfile((prev) => ({
-            ...profile,
-            primaryFocus: prev?.primaryFocus ?? session.user.user_metadata?.primary_focus,
-            reminderEnabled:
-              prev?.reminderEnabled ?? session.user.user_metadata?.reminder_enabled,
-            notificationPermission:
-              prev?.notificationPermission ??
-              session.user.user_metadata?.notification_permission,
-            onboardingCompleted:
-              prev?.onboardingCompleted ??
-              Boolean(session.user.user_metadata?.onboarding_completed),
-          }));
+          let mergedProfile: UserProfile = profile;
+          setCurrentProfile((prev) => {
+            mergedProfile = {
+              ...profile,
+              primaryFocus: prev?.primaryFocus ?? session.user.user_metadata?.primary_focus,
+              reminderEnabled:
+                prev?.reminderEnabled ?? session.user.user_metadata?.reminder_enabled,
+              notificationPermission:
+                prev?.notificationPermission ??
+                session.user.user_metadata?.notification_permission,
+              onboardingCompleted:
+                prev?.onboardingCompleted ??
+                Boolean(session.user.user_metadata?.onboarding_completed),
+            };
+            return mergedProfile;
+          });
           try {
-            localStorage.setItem('journalstream_user_profile', JSON.stringify(profile));
+            localStorage.setItem('journalstream_user_profile', JSON.stringify(mergedProfile));
           } catch {}
         }
       } catch (err) {
@@ -172,10 +237,25 @@ export default function App() {
               user.user_metadata?.full_name || user.user_metadata?.name
             );
             if (isMounted && profile) {
-              setCurrentProfile(profile);
+              const mergedProfile: UserProfile = {
+                ...profile,
+                primaryFocus: profile.primaryFocus ?? user.user_metadata?.primary_focus,
+                reminderEnabled:
+                  profile.reminderEnabled ?? user.user_metadata?.reminder_enabled,
+                notificationPermission:
+                  profile.notificationPermission ??
+                  user.user_metadata?.notification_permission,
+                onboardingCompleted:
+                  profile.onboardingCompleted ??
+                  Boolean(user.user_metadata?.onboarding_completed),
+              };
+              setCurrentProfile(mergedProfile);
               try {
-                localStorage.setItem('journalstream_user_profile', JSON.stringify(profile));
+                localStorage.setItem('journalstream_user_profile', JSON.stringify(mergedProfile));
               } catch {}
+              if (hasCompletedPreviously && !hasCompletedOnboardingForUser(user, mergedProfile)) {
+                setNeedsOnboarding(true);
+              }
             }
           } catch (e) {
             console.warn('Gagal menyinkronkan profil saat auth berubah:', e);
@@ -193,11 +273,16 @@ export default function App() {
   }, []);
 
   const completeEntryAndOpenDashboard = useCallback(
-    (welcomeText?: string) => {
+    (
+      welcomeText?: string,
+      forceOnboarding = false,
+      overrideUser?: SupabaseUser | null,
+      overrideProfile?: UserProfile | null
+    ) => {
       setShowEntryChoiceModal(false);
 
       const hasAuthenticatedSession = (() => {
-        if (welcomeText || pendingWelcomeToast) return true;
+        if (welcomeText || pendingWelcomeToast || overrideUser) return true;
         try {
           return (
             Boolean(localStorage.getItem('journalstream_current_user')) ||
@@ -209,6 +294,15 @@ export default function App() {
       })();
 
       if (hasAuthenticatedSession) {
+        const targetUser = overrideUser ?? currentUser;
+        const targetProfile = overrideProfile ?? currentProfile;
+        const shouldRunOnboarding =
+          forceOnboarding ||
+          pendingForceOnboarding ||
+          !hasCompletedOnboardingForUser(targetUser, targetProfile);
+
+        setPendingForceOnboarding(false);
+        setNeedsOnboarding(shouldRunOnboarding);
         setIsAuthFlowOpen(false);
         try {
           localStorage.setItem('journalstream_has_completed_welcome', 'true');
@@ -221,13 +315,14 @@ export default function App() {
         }
       }
     },
-    [pendingWelcomeToast, showToast]
+    [currentProfile, currentUser, pendingForceOnboarding, pendingWelcomeToast, showToast]
   );
 
   // Callback setelah pengguna berhasil Login atau Daftar akun dari form
   const handleAuthSuccess = (
     user: SupabaseUser,
-    initialProf?: UserProfile
+    initialProf?: UserProfile,
+    meta?: { isNewUser?: boolean }
   ) => {
     setCurrentUser(user);
     try {
@@ -242,8 +337,15 @@ export default function App() {
 
     const displayName = user.user_metadata?.full_name || user.email || 'Pengguna';
     const welcomeMsg = `Selamat datang, ${displayName}!`;
+    const isNewUser = Boolean(meta?.isNewUser);
 
-    completeEntryAndOpenDashboard(welcomeMsg);
+    if (showEntryChoiceModal) {
+      setPendingForceOnboarding(isNewUser);
+      setPendingWelcomeToast(welcomeMsg);
+      return;
+    }
+
+    completeEntryAndOpenDashboard(welcomeMsg, isNewUser, user, initialProf ?? null);
   };
 
   const handleContinueAsGuest = () => {
@@ -259,8 +361,78 @@ export default function App() {
     } catch {}
 
     const welcomeMsg = 'Selamat datang di Ascend Journal! (Mode Tamu)';
-    completeEntryAndOpenDashboard(welcomeMsg);
+    const shouldOnboardGuest = !hasCompletedOnboardingForUser(currentUser, currentProfile);
+
+    if (showEntryChoiceModal) {
+      setPendingForceOnboarding(shouldOnboardGuest);
+      setPendingWelcomeToast(welcomeMsg);
+      return;
+    }
+
+    completeEntryAndOpenDashboard(welcomeMsg, shouldOnboardGuest, currentUser, currentProfile);
   };
+
+  const handleOnboardingComplete = useCallback(
+    (result: OnboardingResult) => {
+      const completedAt = new Date().toISOString();
+      const realToday = getRealToday();
+      const baseProfile: UserProfile = currentProfile ?? {
+        ...initialUserProfile,
+        monthIndex: realToday.monthIndex,
+        monthName: realToday.monthName,
+        year: realToday.year,
+        selectedDay: realToday.day,
+        totalDaysInMonth: realToday.totalDaysInMonth,
+        firstAppOpenAt: completedAt,
+      };
+
+      const updatedProfile: UserProfile = {
+        ...baseProfile,
+        name: result.nickname || baseProfile.name,
+        greetingSubtitle: getFocusGreetingSubtitle(result.primaryFocus),
+        primaryFocus: result.primaryFocus,
+        reminderEnabled: result.reminderEnabled,
+        notificationPermission: result.notificationPermission,
+        onboardingCompleted: true,
+        onboardingCompletedAt: completedAt,
+      };
+
+      const updatedUser: SupabaseUser = {
+        ...currentUser,
+        user_metadata: {
+          ...currentUser.user_metadata,
+          full_name: updatedProfile.name,
+          name: updatedProfile.name,
+          primary_focus: result.primaryFocus,
+          reminder_enabled: result.reminderEnabled,
+          notification_permission: result.notificationPermission,
+          onboarding_completed: true,
+          onboarding_completed_at: completedAt,
+        },
+      };
+
+      setCurrentUser(updatedUser);
+      setCurrentProfile(updatedProfile);
+      setNeedsOnboarding(false);
+      setPendingForceOnboarding(false);
+
+      try {
+        localStorage.setItem(getOnboardingStorageKey(currentUser?.id), 'true');
+        markDevicePermissionsOnboardingPassed();
+        localStorage.setItem('journalstream_current_user', JSON.stringify(updatedUser));
+        localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+      } catch {
+        // ignore storage errors
+      }
+
+      if (isValidSupabaseUserId(currentUser?.id)) {
+        dbService.syncOnboardingPreferences(currentUser.id, updatedProfile).catch(() => {});
+      }
+
+      showToast(`Profil ${updatedProfile.name || 'Anda'} siap! Selamat beraktivitas.`);
+    },
+    [currentProfile, currentUser, showToast]
+  );
 
   const handleUserChange = useCallback((user: SupabaseUser | null) => {
     if (user) {
@@ -287,11 +459,14 @@ export default function App() {
       setCurrentProfile(null);
       setShowEntryChoiceModal(false);
       setPendingWelcomeToast(null);
+      setPendingForceOnboarding(false);
+      setNeedsOnboarding(false);
       setIsAuthFlowOpen(true);
       try {
         localStorage.removeItem('journalstream_current_user');
+        localStorage.removeItem('journalstream_user_profile');
         localStorage.removeItem('journalstream_has_completed_welcome');
-        localStorage.removeItem('ascend_initial_permissions_prompted');
+        localStorage.removeItem(ONBOARDING_DONE_KEY);
       } catch {}
       showToast('Berhasil keluar dari akun. Sampai jumpa kembali!');
     }
@@ -299,15 +474,26 @@ export default function App() {
 
   return (
     <>
-      {/* 1. Layar Sambutan & Auth Flow (Welcome Splash, Login, Register) */}
+      {/* 1. Layar Sambutan & Auth Flow (Welcome Splash -> Login / Register) */}
       {isAuthFlowOpen ? (
         <AuthScreen
           onAuthSuccess={handleAuthSuccess}
           showToast={showToast}
           onContinueAsGuest={handleContinueAsGuest}
         />
+      ) : needsOnboarding ? (
+        /* 2. Alur Pertanyaan Onboarding Pengguna Baru tepat sebelum masuk ke Beranda */
+        <TypeformOnboarding
+          initialName={
+            currentProfile?.name ||
+            currentUser?.user_metadata?.full_name ||
+            currentUser?.user_metadata?.name ||
+            ''
+          }
+          onComplete={handleOnboardingComplete}
+        />
       ) : (
-        /* 2. Langsung tampilkan Dasbor Utama tanpa kuesioner onboarding terlebih dahulu */
+        /* 3. Halaman Beranda / Dasbor Utama */
         <MainDashboard
           currentUser={currentUser}
           initialProfile={currentProfile}

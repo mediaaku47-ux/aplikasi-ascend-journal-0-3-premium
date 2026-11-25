@@ -9,8 +9,7 @@ import {
   Target, 
   StickyNote, 
   FolderArchive, 
-  Settings,
-  ArrowLeft
+  Settings
 } from 'lucide-react';
 import { NavTab, UserProfile } from '../types';
 import { User } from '@supabase/supabase-js';
@@ -63,46 +62,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           : 'bg-[#111827] text-white shadow-xl border-r border-[#263449]'
       }`}
     >
-      {/* 1. Header Logo & Nama ASCEND JOURNAL (atau Ikon Panah Kembali saja saat di halaman fitur) */}
+      {/* 1. Header Logo & Nama ASCEND JOURNAL */}
       <div className={`h-[70px] px-4 flex items-center shrink-0 border-b ${
         isLight ? 'border-teal-500/25' : 'border-[#263449]'
       }`}>
-        {activeTab === 'dashboard' ? (
-          <AscendBrand
-            size="md"
-            theme="dark"
-            onClick={() => onTabChange('dashboard')}
-            showDot={false}
-          />
-        ) : (
-          <div className="flex items-center gap-2.5 min-w-0">
-            <button
-              type="button"
-              onClick={() => onTabChange('dashboard')}
-              className={`p-2 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center shrink-0 ${
-                isLight
-                  ? 'text-teal-200 hover:text-white hover:bg-white/10'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
-              }`}
-              title="Kembali ke Dashboard"
-              aria-label="Kembali ke Dashboard"
-            >
-              <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
-            </button>
-
-            <span className={`text-[14px] font-semibold truncate ${
-              isLight ? 'text-teal-50' : 'text-slate-100'
-            }`}>
-              {navItems.find(item => item.id === activeTab)?.label || (
-                activeTab === 'profile' ? 'Profil Pengguna' :
-                activeTab === 'settings' ? 'Pengaturan' :
-                activeTab === 'notifications' ? 'Pemberitahuan' :
-                activeTab === 'admin-portal' ? 'Portal Administrator' :
-                activeTab === 'admin-feedback' ? 'Penilaian Pengguna' : 'Fitur'
-              )}
-            </span>
-          </div>
-        )}
+        <AscendBrand
+          size="md"
+          theme="dark"
+          onClick={() => onTabChange('dashboard')}
+          showDot={false}
+        />
       </div>
 
       {/* 2. Navigasi Bagian Tengah: Tampilkan Semua Fitur Secara Langsung */}

@@ -43,9 +43,11 @@ import { EventCalendarView } from './Views/EventCalendarView';
 
 import { useDeviceNotifications } from '../hooks/useDeviceNotifications';
 import {
+  checkAllAgendasForReminders,
   checkAllHabitsForDeadlineReminders,
   checkAllTargetsForReminders,
   checkAndTriggerMonthClosingDeviceNotification,
+  sendTestNotification,
 } from '../utils/notifications';
 import { TransactionSuccessModal } from './TransactionSuccessModal';
 import { TransactionReceiptData } from '../utils/transactionReceiptPdf';
@@ -183,8 +185,13 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     setIsSupabaseModalOpen(true);
   };
 
-  const handleSimulateReminder = () => {
-    showToast('Pengingat jurnal malam telah dinonaktifkan.');
+  const handleSimulateReminder = async () => {
+    const sent = await sendTestNotification();
+    if (sent) {
+      showToast('Notifikasi uji coba berhasil dikirim ke perangkat Anda!');
+    } else {
+      showToast('Pastikan izin notifikasi browser/perangkat sudah diaktifkan.');
+    }
   };
 
   const showToast = (msg: string) => {
@@ -347,6 +354,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   const [isCalendarTableMissing, setIsCalendarTableMissing] = useState<boolean>(false);
   const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState<boolean>(() => isValidSupabaseUserId(currentUser?.id));
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
+  const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState<boolean>(false);
+  const [announcementsError, setAnnouncementsError] = useState<string | null>(null);
 
   // Status notifikasi belum dibaca (Unread status)
   const READ_ANNOUNCEMENTS_STORAGE_KEY = 'ascend_read_announcements_ids';
@@ -557,10 +566,14 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     localStorage.setItem('journalstream_habits', JSON.stringify(habits));
   }, [habits, isLoadingFromSupabase]);
 
-  // Pengawas Notifikasi Perangkat (Kebiasaan & Akhir Bulan)
+  // Pengawas Notifikasi Perangkat (Agenda, Kebiasaan, Target & Akhir Bulan)
   // Berjalan di latar belakang setiap 10 detik dan seketika saat tab/layar aktif di seluruh aplikasi
   useEffect(() => {
     const runCheck = () => {
+      const inAppAgendaReminder = checkAllAgendasForReminders(tasks, realToday.day);
+      if (inAppAgendaReminder) {
+        showToast(inAppAgendaReminder.message);
+      }
       checkAllHabitsForDeadlineReminders(habits);
       checkAllTargetsForReminders(targets);
       void checkAndTriggerMonthClosingDeviceNotification(
@@ -592,7 +605,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [habits, targets, tasks, userProfile.monthName, userProfile.monthIndex, userProfile.year]);
+  }, [habits, targets, tasks, realToday.day, userProfile.monthName, userProfile.monthIndex, userProfile.year]);
 
   useEffect(() => {
     if (isLoadingFromSupabase) return;
@@ -963,18 +976,54 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     };
   }, [currentUser?.id]);
 
-  // Muat daftar pengumuman aplikasi dari Supabase / Local Cache
-  const loadAnnouncements = async () => {
+  // Muat daftar pengumuman aplikasi langsung dari Supabase dengan status error & loading akurat
+  const loadAnnouncements = async (silent = false) => {
+    if (!silent) {
+      setIsLoadingAnnouncements(true);
+    }
+    setAnnouncementsError(null);
     try {
-      const data = await dbService.fetchAnnouncements();
-      setAnnouncements(data);
-    } catch (err) {
+      const res = await dbService.fetchAnnouncementsWithStatus(true);
+      if (res.error) {
+        setAnnouncementsError(res.error);
+        const fallback = await dbService.fetchAnnouncements(true);
+        setAnnouncements(fallback);
+      } else {
+        setAnnouncements(res.announcements);
+        try {
+          localStorage.setItem('ascend_app_announcements_cache', JSON.stringify(res.announcements));
+        } catch {}
+      }
+    } catch (err: any) {
+      setAnnouncementsError(err?.message || 'Gagal memuat pemberitahuan dari Supabase.');
       console.warn('Gagal memuat pengumuman:', err);
+    } finally {
+      if (!silent) {
+        setIsLoadingAnnouncements(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadAnnouncements();
+    void loadAnnouncements();
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (activeTab === 'notifications') {
+      void loadAnnouncements(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleUpdated = () => {
+      void loadAnnouncements(true);
+    };
+    window.addEventListener('ascend-announcements-updated', handleUpdated);
+    window.addEventListener('focus', handleUpdated);
+    return () => {
+      window.removeEventListener('ascend-announcements-updated', handleUpdated);
+      window.removeEventListener('focus', handleUpdated);
+    };
   }, []);
 
   // Realtime live sync
@@ -2264,9 +2313,16 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             <Suspense fallback={<PageTransitionSkeleton tab={activeTab} theme={theme} />}>
               <NotificationsView
                 announcements={announcements}
+                tasks={tasks}
+                habits={habits}
+                targets={targets}
                 userProfile={userProfile}
                 currentUser={currentUser}
+                isLoadingAnnouncements={isLoadingAnnouncements}
+                announcementsError={announcementsError}
+                onRefreshAnnouncements={() => loadAnnouncements(false)}
                 onNavigateToDashboard={() => handleTabChange('dashboard')}
+                onNavigateToTab={handleTabChange}
                 onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
                 onSimulateReminder={handleSimulateReminder}
                 onShowToast={showToast}
@@ -2312,12 +2368,12 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       </div>
 
       {toastMessage && (
-        <div className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 animate-in fade-in slide-in-from-bottom-5 duration-200">
+        <div className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-[100] max-w-[calc(100vw-2rem)] sm:max-w-md animate-in fade-in slide-in-from-bottom-5 duration-200">
           <div className="bg-slate-900/95 border border-emerald-500/40 text-white px-4 py-3 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-3">
-            <div className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+            <div className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
               <CheckCircle2 className="w-4 h-4" />
             </div>
-            <span className="text-xs font-semibold text-slate-100">{toastMessage}</span>
+            <span className="text-xs font-semibold text-slate-100 leading-snug break-words">{toastMessage}</span>
           </div>
         </div>
       )}
@@ -2475,8 +2531,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             userProfile={userProfile}
             onShowToast={showToast}
             onAnnouncementsUpdated={(updatedList) => {
-              setAnnouncements(updatedList);
-              showToast('Pengumuman berhasil disiarkan ke seluruh pengguna!');
+              setAnnouncements(updatedList.filter((a) => a.isActive));
+              setAnnouncementsError(null);
             }}
           />
         )}

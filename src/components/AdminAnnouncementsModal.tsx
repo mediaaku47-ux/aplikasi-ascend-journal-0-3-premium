@@ -52,18 +52,27 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
   const [type, setType] = useState<AnnouncementType>('info');
   const [message, setMessage] = useState<string>('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Muat daftar pengumuman saat modal dibuka
+  // Muat daftar pengumuman langsung dari Supabase
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const data = await dbService.fetchAnnouncements(false);
-      setAnnouncements(data);
-      if (onAnnouncementsUpdated) {
-        onAnnouncementsUpdated(data);
+      const res = await dbService.fetchAnnouncementsWithStatus(false);
+      if (res.error) {
+        setLoadError(res.error);
+        setAnnouncements([]);
+      } else {
+        setAnnouncements(res.announcements);
+        if (onAnnouncementsUpdated) {
+          onAnnouncementsUpdated(res.announcements);
+        }
       }
-    } catch (err) {
-      console.warn('Gagal memuat pengumuman admin:', err);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Gagal memuat pengumuman dari Supabase.');
+      setAnnouncements([]);
     } finally {
       setIsLoading(false);
     }
@@ -100,11 +109,25 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
     }
   };
 
+  const generateSafeAnnouncementId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
   // Kirim / Perbarui Pemberitahuan
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!title.trim() || !message.trim()) {
-      onShowToast?.('Judul dan isi pesan pemberitahuan wajib diisi.');
+      const msg = 'Judul dan isi pesan pemberitahuan wajib diisi.';
+      setSubmitError(msg);
+      onShowToast?.(msg);
       return;
     }
 
@@ -113,7 +136,7 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
       const existing = editingId ? announcements.find((a) => a.id === editingId) : null;
       
       const record: AppAnnouncement = {
-        id: editingId || `ann_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id: editingId || generateSafeAnnouncementId(),
         title: title.trim(),
         message: message.trim(),
         type,
@@ -126,8 +149,15 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
         updatedAt: new Date().toISOString(),
       };
 
-      await dbService.upsertAnnouncement(record);
+      const res = await dbService.upsertAnnouncementWithStatus(record);
+      if (!res.success) {
+        const errText = res.error || 'Terjadi kesalahan saat menyimpan ke Supabase.';
+        setSubmitError(errText);
+        onShowToast?.(`Gagal menyimpan ke Supabase: ${errText}`);
+        return;
+      }
 
+      setSubmitError(null);
       onShowToast?.(
         editingId 
           ? 'Pemberitahuan berhasil diperbarui!' 
@@ -138,31 +168,29 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
       await loadData();
     } catch (err: any) {
       console.error('Gagal menyimpan pengumuman:', err);
-      onShowToast?.(`Gagal menyimpan: ${err?.message || 'Terjadi kesalahan sistem'}`);
+      const errText = err?.message || 'Terjadi kesalahan sistem';
+      setSubmitError(errText);
+      onShowToast?.(`Gagal menyimpan: ${errText}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Hapus Pemberitahuan Kembali (Langsung & Tanpa Dialog Browser window.confirm yang Terblokir iframe)
+  // Hapus Pemberitahuan Kembali langsung dari Supabase
   const executeDelete = async (id: string) => {
     try {
-      // 1. Optimistic Update: langsung hilangkan dari layar
-      const updatedList = announcements.filter((a) => a.id !== id);
-      setAnnouncements(updatedList);
-      if (onAnnouncementsUpdated) {
-        onAnnouncementsUpdated(updatedList);
+      setDeleteConfirmId(null);
+      const res = await dbService.deleteAnnouncementWithStatus(id);
+      if (!res.success) {
+        onShowToast?.(`Gagal menghapus di Supabase: ${res.error || 'Akses ditolak'}`);
+        return;
       }
+
       if (editingId === id) {
         resetForm();
       }
-      setDeleteConfirmId(null);
 
-      // 2. Hapus dari database / local cache
-      await dbService.deleteAnnouncement(id);
       onShowToast?.('Pemberitahuan berhasil dihapus kembali.');
-
-      // 3. Sinkronkan ulang data
       await loadData();
     } catch (err: any) {
       console.error('Gagal menghapus pemberitahuan:', err);
@@ -294,6 +322,16 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
               />
             </div>
 
+            {submitError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/35 text-xs text-rose-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-rose-100">Tidak dapat menyiarkan pemberitahuan</p>
+                  <p className="text-rose-200/90 leading-relaxed">{submitError}</p>
+                </div>
+              </div>
+            )}
+
             {/* Tombol Aksi Formulir */}
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-white/10">
               {editingId && (
@@ -313,7 +351,7 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
               >
                 {isSaving ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <RefreshCw className="w-3.5 h-3.5" />
                     <span>Menyimpan...</span>
                   </>
                 ) : editingId ? (
@@ -343,21 +381,37 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
                 type="button"
                 onClick={loadData}
                 disabled={isLoading}
-                className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
               >
-                <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-                <span>Segarkan</span>
+                <RefreshCw className="w-3 h-3" />
+                <span>{isLoading ? 'Memuat...' : 'Segarkan'}</span>
               </button>
             </div>
 
             {isLoading ? (
-              <div className="p-8 text-center text-xs text-white/50 flex flex-col items-center justify-center gap-2">
-                <RefreshCw className="w-5 h-5 animate-spin text-teal-400" />
-                <span>Memuat daftar pemberitahuan...</span>
+              <div className="space-y-2.5" aria-busy="true" aria-label="Memuat daftar pemberitahuan">
+                {[0, 1].map((idx) => (
+                  <div key={idx} className="p-4 rounded-2xl border border-white/10 bg-white/[0.03] space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-20 rounded-md bg-white/10 animate-pulse" />
+                      <div className="h-3 w-28 rounded-md bg-white/5 animate-pulse" />
+                    </div>
+                    <div className="h-4 w-48 rounded-md bg-white/10 animate-pulse" />
+                    <div className="h-10 w-full rounded-xl bg-white/5 animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            ) : loadError ? (
+              <div className="p-5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Gagal memuat data pemberitahuan dari Supabase</p>
+                  <p className="text-rose-200/80 mt-0.5">{loadError}</p>
+                </div>
               </div>
             ) : announcements.length === 0 ? (
               <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/10 text-center text-xs text-white/50">
-                Belum ada pemberitahuan yang disiarkan. Buat pemberitahuan baru di atas!
+                Belum ada pemberitahuan di tabel Supabase. Buat pemberitahuan baru di atas!
               </div>
             ) : (
               <div className="space-y-2.5">
@@ -385,13 +439,15 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
 
                             <span className="text-[10px] text-white/40 flex items-center gap-1">
                               <Clock className="w-3 h-3" />
-                              {new Date(ann.createdAt).toLocaleDateString('id-ID', {
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
+                              {ann.createdAt && !Number.isNaN(new Date(ann.createdAt).getTime())
+                                ? new Date(ann.createdAt).toLocaleDateString('id-ID', {
+                                    day: 'numeric',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })
+                                : '-'}
                             </span>
                           </div>
 
@@ -404,7 +460,7 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
                           </p>
 
                           <div className="text-[11px] text-teal-300/80 pt-1 font-medium">
-                            Dari: {ann.authorName || 'Tim Pembuat Aplikasi'}
+                            Dari: {ann.authorName?.trim() || ann.authorEmail || '-'}
                           </div>
                         </div>
 

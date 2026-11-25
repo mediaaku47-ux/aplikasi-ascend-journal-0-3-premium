@@ -189,7 +189,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         }
       }
     } catch (err: any) {
-      console.warn('Auth Notice:', err?.message || err);
+      const rawMsg = String(err?.message || err || '');
+      console.warn('Auth Notice:', rawMsg);
+      const isAlreadyRegistered =
+        rawMsg.toLowerCase().includes('already registered') ||
+        rawMsg.toLowerCase().includes('user already exists');
+
+      if (mode === 'register' && isAlreadyRegistered) {
+        setMode('login');
+        setAgreedToTerms(false);
+        setSuccessMessage(null);
+        setErrorMessage('Email ini sudah terdaftar. Silakan masuk dengan kata sandi Anda.');
+        showToast('Email sudah terdaftar. Silakan masuk ke akun Anda.');
+        return;
+      }
+
       let friendlyMsg = getReadableAuthError(err);
       friendlyMsg = friendlyMsg
         .replace(/supabase\s*auth/gi, 'sistem akun')
