@@ -5,13 +5,17 @@ import { AppEntryChoiceModal } from './components/AppEntryChoiceModal';
 import { TypeformOnboarding, OnboardingResult } from './components/TypeformOnboarding';
 import { authService, dbService, isValidSupabaseUserId } from './lib/supabaseService';
 import { isSupabaseConfigured } from './lib/supabase';
+import { sanitizeCachedProfile, sanitizeCachedUser } from './utils/admin';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { OnboardingFocus, UserProfile } from './types';
 import { initialUserProfile } from './data/initialData';
 import { getRealToday } from './utils/dateUtils';
 import { CheckCircle2 } from 'lucide-react';
 import { usePWAInstall } from './hooks/usePWAInstall';
-import { markDevicePermissionsOnboardingPassed } from './utils/notifications';
+import {
+  clearDevicePermissionsOnboardingPassed,
+  markDevicePermissionsOnboardingPassed,
+} from './utils/notifications';
 
 const ONBOARDING_DONE_KEY = 'ascend_typeform_onboarding_done';
 
@@ -79,7 +83,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<SupabaseUser>(() => {
     try {
       const cached = localStorage.getItem('journalstream_current_user');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        return sanitizeCachedUser(JSON.parse(cached)) || getFallbackDefaultUser();
+      }
     } catch {
       // ignore
     }
@@ -89,7 +95,7 @@ export default function App() {
   const [currentProfile, setCurrentProfile] = useState<UserProfile | null>(() => {
     try {
       const cached = localStorage.getItem('journalstream_user_profile');
-      return cached ? JSON.parse(cached) : null;
+      return cached ? sanitizeCachedProfile(JSON.parse(cached)) : null;
     } catch {
       return null;
     }
@@ -112,8 +118,8 @@ export default function App() {
 
       const cachedUserRaw = localStorage.getItem('journalstream_current_user');
       const cachedProfileRaw = localStorage.getItem('journalstream_user_profile');
-      const parsedUser = cachedUserRaw ? (JSON.parse(cachedUserRaw) as SupabaseUser) : null;
-      const parsedProfile = cachedProfileRaw ? (JSON.parse(cachedProfileRaw) as UserProfile) : null;
+      const parsedUser = cachedUserRaw ? sanitizeCachedUser(JSON.parse(cachedUserRaw) as SupabaseUser) : null;
+      const parsedProfile = cachedProfileRaw ? sanitizeCachedProfile(JSON.parse(cachedProfileRaw) as UserProfile) : null;
       return !hasCompletedOnboardingForUser(parsedUser, parsedProfile);
     } catch {
       return false;
@@ -171,7 +177,7 @@ export default function App() {
 
         setCurrentUser(session.user);
         try {
-          localStorage.setItem('journalstream_current_user', JSON.stringify(session.user));
+          localStorage.setItem('journalstream_current_user', JSON.stringify(sanitizeCachedUser(session.user)));
         } catch {}
 
         const profile = await dbService.ensureUserProfileInitialized(
@@ -198,7 +204,7 @@ export default function App() {
             return mergedProfile;
           });
           try {
-            localStorage.setItem('journalstream_user_profile', JSON.stringify(mergedProfile));
+            localStorage.setItem('journalstream_user_profile', JSON.stringify(sanitizeCachedProfile(mergedProfile)));
           } catch {}
         }
       } catch (err) {
@@ -215,7 +221,7 @@ export default function App() {
         if (user) {
           setCurrentUser(user);
           try {
-            localStorage.setItem('journalstream_current_user', JSON.stringify(user));
+            localStorage.setItem('journalstream_current_user', JSON.stringify(sanitizeCachedUser(user)));
           } catch {}
 
           const hasCompletedPreviously = (() => {
@@ -251,7 +257,7 @@ export default function App() {
               };
               setCurrentProfile(mergedProfile);
               try {
-                localStorage.setItem('journalstream_user_profile', JSON.stringify(mergedProfile));
+                localStorage.setItem('journalstream_user_profile', JSON.stringify(sanitizeCachedProfile(mergedProfile)));
               } catch {}
               if (hasCompletedPreviously && !hasCompletedOnboardingForUser(user, mergedProfile)) {
                 setNeedsOnboarding(true);
@@ -326,12 +332,12 @@ export default function App() {
   ) => {
     setCurrentUser(user);
     try {
-      localStorage.setItem('journalstream_current_user', JSON.stringify(user));
+      localStorage.setItem('journalstream_current_user', JSON.stringify(sanitizeCachedUser(user)));
     } catch {}
     if (initialProf) {
       setCurrentProfile(initialProf);
       try {
-        localStorage.setItem('journalstream_user_profile', JSON.stringify(initialProf));
+        localStorage.setItem('journalstream_user_profile', JSON.stringify(sanitizeCachedProfile(initialProf)));
       } catch {}
     }
 
@@ -419,8 +425,8 @@ export default function App() {
       try {
         localStorage.setItem(getOnboardingStorageKey(currentUser?.id), 'true');
         markDevicePermissionsOnboardingPassed();
-        localStorage.setItem('journalstream_current_user', JSON.stringify(updatedUser));
-        localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+        localStorage.setItem('journalstream_current_user', JSON.stringify(sanitizeCachedUser(updatedUser)));
+        localStorage.setItem('journalstream_user_profile', JSON.stringify(sanitizeCachedProfile(updatedProfile)));
       } catch {
         // ignore storage errors
       }
@@ -438,7 +444,7 @@ export default function App() {
     if (user) {
       setCurrentUser(user);
       try {
-        localStorage.setItem('journalstream_current_user', JSON.stringify(user));
+        localStorage.setItem('journalstream_current_user', JSON.stringify(sanitizeCachedUser(user)));
       } catch {}
     } else {
       setCurrentUser(getFallbackDefaultUser());
@@ -467,6 +473,7 @@ export default function App() {
         localStorage.removeItem('journalstream_user_profile');
         localStorage.removeItem('journalstream_has_completed_welcome');
         localStorage.removeItem(ONBOARDING_DONE_KEY);
+        clearDevicePermissionsOnboardingPassed();
       } catch {}
       showToast('Berhasil keluar dari akun. Sampai jumpa kembali!');
     }

@@ -965,6 +965,14 @@ export function markDevicePermissionsOnboardingPassed(): void {
   } catch {}
 }
 
+export function clearDevicePermissionsOnboardingPassed(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(DEVICE_PERMISSIONS_STEP_DONE_KEY);
+    localStorage.removeItem(INITIAL_PERMISSIONS_PROMPTED_KEY);
+  } catch {}
+}
+
 const stopMediaTracksSafe = (stream: MediaStream | null | undefined) => {
   if (!stream) return;
   try {
@@ -976,15 +984,23 @@ const stopMediaTracksSafe = (stream: MediaStream | null | undefined) => {
   } catch {}
 };
 
-const isPermissionAlreadyGranted = async (name: 'microphone' | 'camera'): Promise<boolean> => {
-  if (typeof navigator === 'undefined') return false;
+export type MediaPermissionState = 'granted' | 'denied' | 'prompt' | 'unsupported';
+
+const queryMediaPermissionState = async (
+  name: 'microphone' | 'camera'
+): Promise<MediaPermissionState> => {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return 'unsupported';
+  }
   try {
     if (navigator.permissions && typeof navigator.permissions.query === 'function') {
       const status = await navigator.permissions.query({ name: name as PermissionName });
-      return status.state === 'granted';
+      if (status.state === 'granted' || status.state === 'denied' || status.state === 'prompt') {
+        return status.state;
+      }
     }
   } catch {}
-  return false;
+  return 'prompt';
 };
 
 /**
@@ -993,12 +1009,19 @@ const isPermissionAlreadyGranted = async (name: 'microphone' | 'camera'): Promis
 export async function getMicrophoneAndCameraPermissionStatus(): Promise<{
   microphone: boolean;
   camera: boolean;
+  microphoneState: MediaPermissionState;
+  cameraState: MediaPermissionState;
 }> {
-  const [microphone, camera] = await Promise.all([
-    isPermissionAlreadyGranted('microphone'),
-    isPermissionAlreadyGranted('camera'),
+  const [microphoneState, cameraState] = await Promise.all([
+    queryMediaPermissionState('microphone'),
+    queryMediaPermissionState('camera'),
   ]);
-  return { microphone, camera };
+  return {
+    microphone: microphoneState === 'granted',
+    camera: cameraState === 'granted',
+    microphoneState,
+    cameraState,
+  };
 }
 
 /**
@@ -1008,44 +1031,121 @@ export async function getMicrophoneAndCameraPermissionStatus(): Promise<{
 export async function requestMicrophoneAndCameraPermissions(): Promise<{
   microphone: boolean;
   camera: boolean;
+  microphoneState: MediaPermissionState;
+  cameraState: MediaPermissionState;
+  blockedByPolicy: boolean;
 }> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return {
+      microphone: false,
+      camera: false,
+      microphoneState: 'unsupported',
+      cameraState: 'unsupported',
+      blockedByPolicy: false,
+    };
+  }
+
   let micGranted = false;
   let camGranted = false;
+  let micDenied = false;
+  let camDenied = false;
+  let micNotFound = false;
+  let camNotFound = false;
+  let blockedByPolicy = false;
 
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    return { microphone: false, camera: false };
-  }
-
-  let audioStream: MediaStream | null = null;
+  // Coba minta mikrofon dan kamera bersamaan dalam satu gestur klik pengguna
+  let combinedStream: MediaStream | null = null;
   try {
-    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micGranted = true;
-  } catch {
-    micGranted = await isPermissionAlreadyGranted('microphone');
+    combinedStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    micGranted = combinedStream.getAudioTracks().length > 0;
+    camGranted = combinedStream.getVideoTracks().length > 0;
+  } catch (err: any) {
+    const rawMsg = String(err?.message || '').toLowerCase();
+    if (rawMsg.includes('permissions policy') || rawMsg.includes('feature policy')) {
+      blockedByPolicy = true;
+    } else {
+      // Fallback terpisah apabila salah satu perangkat tidak tersedia atau ditolak
+      let audioStream: MediaStream | null = null;
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micGranted = true;
+      } catch (audioErr: any) {
+        const audioMsg = String(audioErr?.message || '').toLowerCase();
+        const audioName = String(audioErr?.name || '');
+        if (audioMsg.includes('permissions policy') || audioMsg.includes('feature policy')) {
+          blockedByPolicy = true;
+        } else if (audioName === 'NotFoundError' || audioName === 'DevicesNotFoundError') {
+          micNotFound = true;
+        } else if (audioName === 'NotAllowedError' || audioName === 'PermissionDeniedError') {
+          micDenied = true;
+        }
+      } finally {
+        stopMediaTracksSafe(audioStream);
+        audioStream = null;
+      }
+
+      let videoStream: MediaStream | null = null;
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        camGranted = true;
+      } catch (videoErr: any) {
+        const videoMsg = String(videoErr?.message || '').toLowerCase();
+        const videoName = String(videoErr?.name || '');
+        if (videoMsg.includes('permissions policy') || videoMsg.includes('feature policy')) {
+          blockedByPolicy = true;
+        } else if (videoName === 'NotFoundError' || videoName === 'DevicesNotFoundError') {
+          camNotFound = true;
+        } else if (videoName === 'NotAllowedError' || videoName === 'PermissionDeniedError') {
+          camDenied = true;
+        }
+      } finally {
+        stopMediaTracksSafe(videoStream);
+        videoStream = null;
+      }
+    }
   } finally {
-    stopMediaTracksSafe(audioStream);
-    audioStream = null;
+    stopMediaTracksSafe(combinedStream);
+    combinedStream = null;
   }
 
-  let videoStream: MediaStream | null = null;
-  try {
-    videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-    camGranted = true;
-  } catch {
-    camGranted = await isPermissionAlreadyGranted('camera');
-  } finally {
-    stopMediaTracksSafe(videoStream);
-    videoStream = null;
-  }
+  const [queriedMic, queriedCam] = await Promise.all([
+    queryMediaPermissionState('microphone'),
+    queryMediaPermissionState('camera'),
+  ]);
+
+  const microphoneState: MediaPermissionState = micGranted
+    ? 'granted'
+    : micNotFound
+      ? 'unsupported'
+      : blockedByPolicy || micDenied || queriedMic === 'denied'
+        ? 'denied'
+        : queriedMic;
+
+  const cameraState: MediaPermissionState = camGranted
+    ? 'granted'
+    : camNotFound
+      ? 'unsupported'
+      : blockedByPolicy || camDenied || queriedCam === 'denied'
+        ? 'denied'
+        : queriedCam;
+
+  const finalMic = microphoneState === 'granted';
+  const finalCam = cameraState === 'granted';
 
   try {
     localStorage.setItem(
       'ascend_device_media_permissions',
-      JSON.stringify({ microphone: micGranted, camera: camGranted })
+      JSON.stringify({ microphone: finalMic, camera: finalCam })
     );
   } catch {}
 
-  return { microphone: micGranted, camera: camGranted };
+  return {
+    microphone: finalMic,
+    camera: finalCam,
+    microphoneState,
+    cameraState,
+    blockedByPolicy,
+  };
 }
 
 /**

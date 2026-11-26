@@ -12,11 +12,14 @@ import {
   Copy,
   Check,
   X,
+  Lock,
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
 import { UserProfile } from '../../types';
 import { dbService, isSupabaseConfigured, subscribeToAllFeedbacks } from '../../lib/supabaseService';
 import { isSupabaseConfigured as hasSupabaseClient } from '../../lib/supabase';
+import { checkIsAdminUser } from '../../utils/admin';
+import { AnimatedCounter } from '../AnimatedCounter';
 
 export interface UserFeedbackRecord {
   id: string;
@@ -44,10 +47,20 @@ export const AdminFeedbackView: React.FC<AdminFeedbackViewProps> = ({
   currentUser,
   userProfile,
   onShowToast,
+  onNavigateToDashboard,
   theme = 'light',
   embedded = false,
 }) => {
   const isLight = theme === 'light';
+  const isAdmin = checkIsAdminUser(currentUser, userProfile);
+  const [feedbackTouchKeys, setFeedbackTouchKeys] = useState<[number, number]>([0, 0]);
+  const replayFeedbackCard = (index: 0 | 1) => {
+    setFeedbackTouchKeys((prev) => {
+      const next: [number, number] = [...prev] as [number, number];
+      next[index] = next[index] + 1;
+      return next;
+    });
+  };
   const [feedbacks, setFeedbacks] = useState<UserFeedbackRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
@@ -88,17 +101,34 @@ export const AdminFeedbackView: React.FC<AdminFeedbackViewProps> = ({
     }
   }, []);
 
-  const ADMIN_RLS_SQL_SNIPPET = `-- Jalankan di Supabase SQL Editor agar Admin dapat membaca semua saran & penilaian pengguna
+  const ADMIN_RLS_SQL_SNIPPET = `-- Jalankan di Supabase SQL Editor agar Admin (role = 'admin') dapat membaca semua saran & penilaian pengguna
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS feedback JSONB;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT (
+    COALESCE(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin'
+    OR EXISTS (
+      SELECT 1
+      FROM public.user_profiles up
+      WHERE up.id = auth.uid()
+        AND up.role = 'admin'
+    )
+  );
+$$;
 
 DROP POLICY IF EXISTS "Users can view own profile" ON public.user_profiles;
 CREATE POLICY "Users can view own profile" ON public.user_profiles
   FOR SELECT USING (
     auth.uid() = id
-    OR feedback IS NOT NULL
-    OR (auth.jwt() ->> 'email') = 'kamalizudin36@gmail.com'
-    OR (auth.jwt() ->> 'email') LIKE 'admin@%'
+    OR public.is_admin()
   );
 
 CREATE TABLE IF NOT EXISTS public.user_feedbacks (
@@ -116,11 +146,11 @@ CREATE TABLE IF NOT EXISTS public.user_feedbacks (
 ALTER TABLE public.user_feedbacks ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Admin or owner can view feedbacks" ON public.user_feedbacks;
-CREATE POLICY "Admin or owner can view feedbacks" ON public.user_feedbacks
+DROP POLICY IF EXISTS "Users and admin can view feedbacks" ON public.user_feedbacks;
+CREATE POLICY "Users and admin can view feedbacks" ON public.user_feedbacks
   FOR SELECT USING (
     auth.uid() = user_id
-    OR (auth.jwt() ->> 'email') = 'kamalizudin36@gmail.com'
-    OR (auth.jwt() ->> 'email') LIKE 'admin@%'
+    OR public.is_admin()
   );
 
 DROP POLICY IF EXISTS "Users can insert own feedback" ON public.user_feedbacks;
@@ -152,13 +182,20 @@ END $$;`;
     }
   };
 
-  // Sinkronisasi awal & saat sesi akun berubah
+  // Sinkronisasi awal & saat sesi akun berubah (Hanya jika role terverifikasi Admin)
   useEffect(() => {
+    if (!isAdmin) {
+      setIsLoading(false);
+      setFeedbacks([]);
+      return;
+    }
     loadFeedbacks(!hasLoadedOnceRef.current);
-  }, [currentUser?.id, loadFeedbacks]);
+  }, [isAdmin, currentUser?.id, loadFeedbacks]);
 
-  // Channel Realtime Cloud + fokus tab + interval latar belakang
+  // Channel Realtime Cloud + fokus tab + interval latar belakang (Hanya untuk Admin)
   useEffect(() => {
+    if (!isAdmin) return;
+
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const triggerSilentRefresh = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -200,7 +237,7 @@ END $$;`;
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       clearInterval(syncInterval);
     };
-  }, [loadFeedbacks]);
+  }, [isAdmin, loadFeedbacks]);
 
   // Statistik Agregat
   const stats = useMemo(() => {
@@ -321,6 +358,40 @@ END $$;`;
     onShowToast?.('Data penilaian pengguna berhasil diekspor ke CSV!');
   };
 
+  if (!isAdmin) {
+    return (
+      <div
+        className={`w-full ${embedded ? 'py-12' : 'min-h-[60vh]'} flex items-center justify-center p-6 text-center ${
+          isLight ? 'text-slate-900' : 'text-white'
+        }`}
+      >
+        <div
+          className={`max-w-md p-8 rounded-3xl border shadow-xl ${
+            isLight ? 'bg-white border-rose-200' : 'bg-[#0f172a] border-rose-500/30'
+          }`}
+        >
+          <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 mx-auto flex items-center justify-center mb-4">
+            <Lock className="w-7 h-7" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">Akses Ditolak</h2>
+          <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+            Halaman penilaian dan saran seluruh pengguna hanya dapat diakses oleh akun dengan role{' '}
+            <code className="font-mono font-bold">admin</code> resmi di Supabase.
+          </p>
+          {onNavigateToDashboard && (
+            <button
+              type="button"
+              onClick={onNavigateToDashboard}
+              className="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition-all cursor-pointer"
+            >
+              Kembali ke Beranda
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const starDistributionRows = [
     { star: 5, count: stats.fiveStars },
     { star: 4, count: stats.fourStars },
@@ -330,8 +401,8 @@ END $$;`;
   ];
 
   const cardBase = isLight
-    ? 'bg-white border border-slate-200/80 shadow-[0_2px_12px_rgba(15,23,42,0.04)] text-slate-900'
-    : 'bg-[#0f172a] border border-white/10 shadow-lg text-white';
+    ? 'bg-white border border-slate-200/90 shadow-[0_1px_3px_rgba(15,23,42,0.04)] text-slate-900'
+    : 'bg-[#0f172a] border border-white/10 text-white';
 
   return (
     <div className={`space-y-4 animate-fade-in ${embedded ? '' : 'pb-24 sm:pb-14 max-w-5xl mx-auto'}`}>
@@ -392,14 +463,11 @@ END $$;`;
           </div>
         </div>
       ) : (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-0.5">
           <div>
-            <h3 className={`text-base sm:text-lg font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              Penilaian &amp; Penerimaan Saran Pengguna
-            </h3>
-            <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              Ringkasan kepuasan, distribusi bintang, dan masukan langsung dari pengguna.
-            </p>
+            <h2 className={`font-['Poppins',sans-serif] text-lg sm:text-xl font-bold tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+              Penilaian &amp; Saran Pengguna
+            </h2>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -492,39 +560,46 @@ END $$;`;
 
       {/* 3 Kartu Statistik Ringkas (Skeleton Loading saat memuat) */}
       {isLoading ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5" aria-busy="true" aria-label="Memuat ringkasan penilaian">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3" aria-busy="true" aria-label="Memuat ringkasan penilaian">
           {[0, 1, 2].map((idx) => (
-            <div key={idx} className={`rounded-2xl p-5 space-y-3 ${cardBase}`}>
-              <div className={`h-3 w-32 rounded-md animate-pulse ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
-              <div className={`h-9 w-24 rounded-lg animate-pulse ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
-              <div className={`h-3.5 w-44 rounded-md animate-pulse ${isLight ? 'bg-slate-100' : 'bg-white/5'}`} />
+            <div key={idx} className={`rounded-2xl p-3.5 sm:p-4 space-y-2.5 ${cardBase}`}>
+              <div className={`h-3 w-28 rounded animate-pulse ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
+              <div className={`h-8 w-20 rounded-md animate-pulse ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
+              <div className={`h-3 w-40 rounded animate-pulse ${isLight ? 'bg-slate-100' : 'bg-white/5'}`} />
             </div>
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {/* Kartu 1: RATA-RATA PENILAIAN */}
-          <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
-            <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+          <div
+            onClick={() => replayFeedbackCard(0)}
+            className={`group rounded-2xl p-3.5 sm:p-4 transition-all duration-200 hover:-translate-y-1 active:scale-[0.96] active:translate-y-0.5 cursor-pointer select-none ${cardBase}`}
+          >
+            <span className={`text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider block ${
               isLight ? 'text-slate-500' : 'text-slate-400'
             }`}>
-              RATA-RATA PENILAIAN
+              Rata-Rata Penilaian
             </span>
-            <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className={`text-3xl sm:text-4xl font-black tracking-tight tabular-nums ${
+            <div className="mt-2 flex items-baseline gap-1.5 origin-left transition-transform duration-200 group-hover:scale-105 group-active:translate-x-0.5">
+              <span className={`text-3xl sm:text-4xl font-bold font-['JetBrains_Mono',monospace] tracking-tight tabular-nums ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}>
-                {stats.average > 0 ? stats.average.toFixed(1) : '0.0'}
+                <AnimatedCounter
+                  key={`fb-kpi-0-${feedbackTouchKeys[0]}`}
+                  value={stats.average > 0 ? stats.average : 0}
+                  decimals={1}
+                />
               </span>
-              <span className={`text-sm font-semibold ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
+              <span className={`text-sm sm:text-base font-semibold font-['JetBrains_Mono',monospace] tabular-nums ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
                 / 5.0
               </span>
             </div>
-            <div className="mt-2.5 flex items-center gap-1">
+            <div className="mt-2 flex items-center gap-1">
               {[1, 2, 3, 4, 5].map((star) => (
                 <Star
                   key={star}
-                  className={`w-4 h-4 ${
+                  className={`w-3.5 h-3.5 ${
                     star <= Math.round(stats.average)
                       ? 'text-amber-400 fill-amber-400'
                       : isLight
@@ -533,53 +608,62 @@ END $$;`;
                   }`}
                 />
               ))}
-              <span className={`text-xs font-medium ml-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+              <span className={`text-[11px] font-normal ml-1.5 font-['JetBrains_Mono',monospace] tabular-nums ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                 ({stats.total} ulasan)
               </span>
             </div>
           </div>
 
           {/* Kartu 2: TINGKAT KEPUASAN */}
-          <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
-            <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+          <div
+            onClick={() => replayFeedbackCard(1)}
+            className={`group rounded-2xl p-3.5 sm:p-4 transition-all duration-200 hover:-translate-y-1 active:scale-[0.96] active:translate-y-0.5 cursor-pointer select-none ${cardBase}`}
+          >
+            <span className={`text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider block ${
               isLight ? 'text-slate-500' : 'text-slate-400'
             }`}>
-              TINGKAT KEPUASAN
+              Tingkat Kepuasan
             </span>
-            <div className="mt-2.5">
-              <span className="text-3xl sm:text-4xl font-black tracking-tight text-emerald-500 tabular-nums">
-                {stats.satisfactionPct}%
+            <div className="mt-2 origin-left transition-transform duration-200 group-hover:scale-105 group-active:translate-x-0.5">
+              <span className={`text-3xl sm:text-4xl font-bold font-['JetBrains_Mono',monospace] tracking-tight tabular-nums ${
+                isLight ? 'text-emerald-700' : 'text-emerald-400'
+              }`}>
+                <AnimatedCounter
+                  key={`fb-kpi-1-${feedbackTouchKeys[1]}`}
+                  value={stats.satisfactionPct}
+                  suffix="%"
+                />
               </span>
             </div>
-            <p className={`mt-2.5 text-xs font-medium flex items-center gap-1.5 ${
+            <p className={`mt-2 text-xs font-normal flex items-center gap-1.5 ${
               isLight ? 'text-slate-600' : 'text-slate-300'
             }`}>
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-              <span>
-                {stats.satisfiedCount} dari {stats.total} pengguna memberi bintang 4 atau 5
+              <TrendingUp className={`w-3.5 h-3.5 shrink-0 ${isLight ? 'text-emerald-600' : 'text-emerald-400'}`} />
+              <span className="tabular-nums">
+                {stats.satisfiedCount} dari {stats.total} pengguna puas
               </span>
             </p>
           </div>
 
           {/* Kartu 3: DISTRIBUSI BINTANG */}
-          <div className={`rounded-2xl p-5 transition-all ${cardBase}`}>
-            <span className={`text-[11px] font-bold uppercase tracking-wider block mb-3 ${
+          <div className={`rounded-2xl p-3.5 sm:p-4 transition-all duration-200 hover:-translate-y-1 active:scale-[0.98] ${cardBase}`}>
+            <span className={`text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider block mb-2.5 ${
               isLight ? 'text-slate-500' : 'text-slate-400'
             }`}>
-              DISTRIBUSI BINTANG
+              Distribusi Bintang
             </span>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {starDistributionRows.map(({ star, count }) => {
                 const pct = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
                 return (
-                  <div key={star} className="flex items-center gap-2.5">
-                    <div className="flex items-center gap-1 w-7 shrink-0">
-                      <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-slate-700' : 'text-slate-200'}`}>
+                  <div key={star} className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 w-6 shrink-0">
+                      <span className={`text-[11px] font-semibold font-['JetBrains_Mono',monospace] tabular-nums ${isLight ? 'text-slate-700' : 'text-slate-200'}`}>
                         {star}
                       </span>
                       <Star className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
                     </div>
-                    <div className={`flex-1 h-2 rounded-full overflow-hidden ${
+                    <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${
                       isLight ? 'bg-slate-100' : 'bg-white/10'
                     }`}>
                       <div
@@ -587,7 +671,7 @@ END $$;`;
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <span className={`text-xs font-semibold w-5 text-right tabular-nums ${
+                    <span className={`text-[11px] font-semibold font-['JetBrains_Mono',monospace] w-5 text-right tabular-nums ${
                       isLight ? 'text-slate-600' : 'text-slate-300'
                     }`}>
                       {count}
@@ -673,19 +757,20 @@ END $$;`;
         </div>
       ) : (
         <div className="space-y-3">
-          <div className={`flex items-center justify-between text-xs px-1 ${
+          <div className={`flex items-center justify-between text-[11px] px-0.5 ${
             isLight ? 'text-slate-500' : 'text-slate-400'
           }`}>
-            <span>Menampilkan {filteredFeedbacks.length} dari {feedbacks.length} ulasan</span>
-            <span className="inline-flex items-center gap-1.5 font-medium">
-              <span className={`w-2 h-2 rounded-full ${
-                isRealtimeConnected ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500/70'
-              }`} />
-              <span>{isRealtimeConnected ? 'Realtime Live Aktif' : 'Sinkronisasi Cloud Aktif'}</span>
+            <span className="font-['JetBrains_Mono',monospace] tabular-nums">
+              {filteredFeedbacks.length} dari {feedbacks.length} ulasan
+            </span>
+            <span className={`font-semibold uppercase tracking-wider ${
+              isLight ? 'text-emerald-700' : 'text-emerald-400'
+            }`}>
+              {isRealtimeConnected ? 'Realtime Aktif' : 'Sinkronisasi Cloud'}
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {filteredFeedbacks.map((fb) => {
               const displayName = fb.fullName.trim() || 'Tanpa nama';
               const displayInitial = fb.fullName.trim()
@@ -697,23 +782,23 @@ END $$;`;
               return (
               <div
                 key={fb.id}
-                className={`p-4 sm:p-5 rounded-2xl transition-all flex flex-col justify-between ${cardBase}`}
+                className={`p-3.5 sm:p-4 rounded-2xl transition-colors flex flex-col justify-between ${cardBase}`}
               >
                 <div>
                   {/* Info Pengirim & Badge Bintang */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-start justify-between gap-2.5 mb-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       {fb.avatarUrl ? (
                         <img
                           src={fb.avatarUrl}
                           alt={displayName}
                           referrerPolicy="no-referrer"
-                          className={`w-10 h-10 rounded-xl object-cover border shrink-0 ${
+                          className={`w-9 h-9 rounded-xl object-cover border shrink-0 ${
                             isLight ? 'border-slate-200' : 'border-white/15'
                           }`}
                         />
                       ) : (
-                        <div className={`w-10 h-10 rounded-xl border flex items-center justify-center font-bold text-sm shrink-0 ${
+                        <div className={`w-9 h-9 rounded-xl border flex items-center justify-center font-semibold text-xs shrink-0 ${
                           isLight
                             ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                             : 'bg-teal-500/15 border-teal-500/30 text-teal-300'
@@ -722,27 +807,27 @@ END $$;`;
                         </div>
                       )}
                       <div className="min-w-0">
-                        <h4 className={`text-sm font-bold truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                        <h4 className={`font-['Poppins',sans-serif] text-[13px] sm:text-sm font-semibold tracking-tight truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
                           {displayName}
                         </h4>
-                        <p className={`text-[11px] truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        <p className={`text-[11px] font-normal truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                           {fb.email || '-'}
                         </p>
                       </div>
                     </div>
 
-                    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border shrink-0 ${
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border shrink-0 ${
                       isLight
-                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        ? 'bg-amber-50 border-amber-200 text-amber-800'
                         : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
                     }`}>
-                      <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                      <span className="text-xs font-bold tabular-nums">{fb.rating}.0</span>
+                      <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                      <span className="text-[11px] font-semibold font-['JetBrains_Mono',monospace] tabular-nums">{fb.rating}.0</span>
                     </div>
                   </div>
 
                   {/* Baris Bintang */}
-                  <div className="flex items-center gap-1 mb-3">
+                  <div className="flex items-center gap-1 mb-2.5">
                     {[1, 2, 3, 4, 5].map((s) => (
                       <Star
                         key={s}
@@ -755,7 +840,7 @@ END $$;`;
                         }`}
                       />
                     ))}
-                    <span className={`text-[11px] font-semibold ml-1.5 ${
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ml-1.5 ${
                       isLight ? 'text-slate-500' : 'text-slate-400'
                     }`}>
                       {fb.rating === 5
@@ -772,24 +857,20 @@ END $$;`;
 
                   {/* Tags */}
                   {fb.tags && fb.tags.length > 0 && (
-                    <div className="flex items-center gap-1.5 flex-wrap mb-3">
-                      {fb.tags.map((t) => (
-                        <span
-                          key={t}
-                          className={`px-2 py-0.5 rounded-lg border text-[11px] font-medium ${
-                            isLight
-                              ? 'bg-slate-100 border-slate-200 text-slate-700'
-                              : 'bg-white/5 border-white/10 text-slate-300'
-                          }`}
-                        >
-                          {t}
-                        </span>
+                    <div className={`flex items-center gap-1.5 flex-wrap mb-2.5 text-[11px] font-medium ${
+                      isLight ? 'text-slate-600' : 'text-slate-300'
+                    }`}>
+                      {fb.tags.map((t, idx) => (
+                        <React.Fragment key={t}>
+                          {idx > 0 && <span aria-hidden="true" className="opacity-50">·</span>}
+                          <span>{t}</span>
+                        </React.Fragment>
                       ))}
                     </div>
                   )}
 
                   {/* Isi Saran */}
-                  <div className={`p-3.5 rounded-xl border text-xs leading-relaxed mb-3 ${
+                  <div className={`p-3 rounded-xl border text-xs font-normal leading-relaxed mb-2.5 ${
                     isLight
                       ? 'bg-slate-50 border-slate-200/80 text-slate-700'
                       : 'bg-white/[0.03] border-white/5 text-white/85'
@@ -805,11 +886,11 @@ END $$;`;
                 </div>
 
                 {/* Footer Kartu */}
-                <div className={`pt-2.5 border-t flex items-center justify-between text-[11px] ${
-                  isLight ? 'border-slate-100 text-slate-400' : 'border-white/5 text-white/40'
+                <div className={`pt-2 border-t flex items-center justify-between text-[11px] font-['JetBrains_Mono',monospace] tabular-nums ${
+                  isLight ? 'border-slate-100 text-slate-500' : 'border-white/5 text-slate-400'
                 }`}>
                   <div className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
+                    <Clock className="w-3 h-3 shrink-0" />
                     <span>
                       {(fb.updatedAt || fb.submittedAt)
                         ? new Date(fb.updatedAt || fb.submittedAt || '').toLocaleDateString('id-ID', {
@@ -822,8 +903,8 @@ END $$;`;
                         : 'Waktu tidak tercatat'}
                     </span>
                   </div>
-                  <span className="text-[10px] font-mono truncate max-w-[110px]" title={fb.id}>
-                    ID: {fb.id.slice(0, 8)}...
+                  <span className="text-[10px] truncate max-w-[100px]" title={fb.id}>
+                    {fb.id.slice(0, 8)}
                   </span>
                 </div>
               </div>

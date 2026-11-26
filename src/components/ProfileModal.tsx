@@ -391,7 +391,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   </label>
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-white/[0.02] border border-white/10 rounded-xl text-white/60 text-sm">
                     <Mail className="w-4 h-4 text-white/40" />
-                    <span>{currentUser?.email || 'kamalizudin36@gmail.com'}</span>
+                    <span>{currentUser?.email || userProfile.email || 'Belum terhubung ke Cloud'}</span>
                     <span className="ml-auto text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
                       Terverifikasi
                     </span>
@@ -873,7 +873,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
                         try {
                           const res = await onUpdateProfile(updatedProfile);
-                          localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+                          const { role: _omitRole, ...safeStorageProfile } = updatedProfile;
+                          localStorage.setItem('journalstream_user_profile', JSON.stringify(safeStorageProfile));
                           localStorage.setItem('journalstream_app_feedback', JSON.stringify(newFeedback));
                           if (res && res.ok === false) {
                             setFeedbackError(res.error || 'Tersimpan di perangkat lokal, tetapi gagal sinkron ke server cloud.');

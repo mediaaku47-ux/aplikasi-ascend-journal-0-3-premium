@@ -352,7 +352,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 userName={userProfile.name}
                 size="md"
                 showControls={true}
-                showRemoveButton={false}
+                showRemoveButton={true}
                 theme={theme}
                 onAvatarUpdated={(newUrl) => {
                   setAvatarUrl(newUrl);
@@ -565,7 +565,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <form onSubmit={handleUpdatePassword} className="space-y-3.5">
                     <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 pb-1">
                       <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-cyan-400" />
-                      <span>Akun: <strong className="text-slate-700 dark:text-slate-200">{currentUser?.email || 'kamalizudin36@gmail.com'}</strong></span>
+                      <span>Akun: <strong className="text-slate-700 dark:text-slate-200">{currentUser?.email || userProfile.email || 'Belum terhubung ke Cloud'}</strong></span>
                     </div>
 
                     {passwordSuccess && (
@@ -932,7 +932,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
           )}
 
-          {/* Pusat Kontrol Admin Eksklusif (Hanya untuk Akun Kamal Ahmad) */}
+          {/* Pusat Kontrol Admin Eksklusif (Hanya untuk akun dengan role 'admin' di Supabase) */}
           {isAdmin && (
             <div className="pt-2">
               <button
@@ -971,7 +971,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 }`}>
                   <div className="text-[11px] font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5 pb-1 border-b border-amber-500/20">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Fitur Administratif (Akun Kamal Ahmad)</span>
+                    <span>Fitur Administratif (Role Admin)</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -1037,7 +1037,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         isLight ? 'text-slate-600' : 'text-slate-300'
       }`}>
         <div>
-          <span>{currentUser?.email || 'kamalizudin36@gmail.com'}</span>
+          <span>{currentUser?.email || userProfile.email || 'Mode Lokal (Belum Login Cloud)'}</span>
         </div>
       </footer>
 

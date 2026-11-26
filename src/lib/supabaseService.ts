@@ -446,6 +446,67 @@ async function verifyActiveSupabaseSession(
   }
 }
 
+async function verifyActiveAdminSession(): Promise<
+  | { ok: true; client: ReturnType<typeof getSupabase>; userId: string; sessionUser: User }
+  | { ok: false; error: string }
+> {
+  const sessionCheck = await verifyActiveSupabaseSession(undefined, false);
+  if (sessionCheck.ok === false) {
+    return { ok: false, error: sessionCheck.error.message };
+  }
+
+  const appMetaRole = (sessionCheck.sessionUser.app_metadata as Record<string, unknown> | undefined)?.role;
+  if (appMetaRole === 'admin') {
+    return {
+      ok: true,
+      client: sessionCheck.client,
+      userId: sessionCheck.userId,
+      sessionUser: sessionCheck.sessionUser,
+    };
+  }
+
+  try {
+    const { data, error } = await sessionCheck.client
+      .from('user_profiles')
+      .select('role')
+      .eq('id', sessionCheck.userId)
+      .maybeSingle();
+
+    if (error) {
+      const msg = error.message || '';
+      if (
+        error.code === '42703' ||
+        error.code === 'PGRST204' ||
+        msg.includes('role') ||
+        msg.includes('column')
+      ) {
+        return {
+          ok: false,
+          error:
+            "Kolom 'role' pada tabel user_profiles belum tersedia di Supabase. Jalankan skrip migrasi SQL RLS terlebih dahulu.",
+        };
+      }
+      return { ok: false, error: msg };
+    }
+
+    if (data?.role === 'admin') {
+      return {
+        ok: true,
+        client: sessionCheck.client,
+        userId: sessionCheck.userId,
+        sessionUser: sessionCheck.sessionUser,
+      };
+    }
+
+    return {
+      ok: false,
+      error: "Akses ditolak: Akun Anda tidak memiliki role 'admin' resmi di database Supabase.",
+    };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Gagal memverifikasi hak akses Administrator.' };
+  }
+}
+
 export const dbService = {
   // Ambil semua data pengguna dari tabel-tabel Supabase
   async fetchAllUserData(userId: string): Promise<CloudFullData | null> {
@@ -494,6 +555,7 @@ export const dbService = {
         result.userProfile = {
           name: p.full_name || 'Pengguna',
           email: p.email || check.sessionUser?.email || undefined,
+          role: p.role === 'admin' ? 'admin' : 'user',
           avatarUrl: p.avatar_url || undefined,
           greetingTitle: p.greeting_title || `Selamat Datang, ${p.full_name || 'Pengguna'}`,
           greetingSubtitle: p.greeting_subtitle || 'Ayo lebih produktif lagi.',
@@ -613,6 +675,23 @@ export const dbService = {
     let displayName = fullName || email?.split('@')[0] || 'Pengguna Baru';
 
     try {
+      const { data: sessionData } = await client.auth.getSession();
+      const activeSessionUser = sessionData?.session?.user;
+      if (!activeSessionUser || activeSessionUser.id !== userId) {
+        return {
+          name: displayName,
+          email: email || undefined,
+          role: 'user',
+          greetingTitle: `Selamat Datang, ${displayName}`,
+          greetingSubtitle: 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.',
+          streakDays: 0,
+          currencySymbol: 'Rp',
+          monthName: 'Bulan Berjalan',
+          year: new Date().getFullYear(),
+          totalDaysInMonth: 31,
+        };
+      }
+
       // Cek apakah profil sudah ada di tabel user_profiles
       const { data: existing, error } = await client.from('user_profiles').select('*').eq('id', userId).maybeSingle();
       
@@ -628,6 +707,8 @@ export const dbService = {
 
         return {
           name: existing.full_name || displayName,
+          email: existing.email || email || undefined,
+          role: existing.role === 'admin' ? 'admin' : 'user',
           avatarUrl: displayAvatarUrl,
           greetingTitle: existing.greeting_title || `Selamat Datang, ${displayName}`,
           greetingSubtitle: existing.greeting_subtitle || 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.',
@@ -642,10 +723,11 @@ export const dbService = {
         };
       }
 
-      // Inisialisasi profil baru untuk Supabase User ID jika belum terdaftar
+      // Inisialisasi profil baru untuk Supabase User ID jika belum terdaftar (role default selalu 'user')
       const initialProfile = {
         id: userId,
-        email: email || null,
+        email: email || activeSessionUser.email || null,
+        role: 'user' as const,
         full_name: displayName,
         greeting_title: `Selamat Datang, ${displayName}`,
         greeting_subtitle: 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.',
@@ -655,7 +737,18 @@ export const dbService = {
         updated_at: new Date().toISOString(),
       };
 
-      await client.from('user_profiles').upsert(initialProfile);
+      const insertRes = await client.from('user_profiles').insert(initialProfile);
+      if (insertRes.error && insertRes.error.code !== '23505') {
+        if (insertRes.error.message?.includes('role') || insertRes.error.code === '42703') {
+          const { role: _omitRole, ...legacyProfile } = initialProfile;
+          const retryLegacy = await client.from('user_profiles').insert(legacyProfile);
+          if (retryLegacy.error && retryLegacy.error.code !== '23505') {
+            console.warn('Notice inserting legacy user_profiles row:', retryLegacy.error.message);
+          }
+        } else {
+          console.warn('Notice inserting user_profiles row:', insertRes.error.message);
+        }
+      }
 
       // Pastikan baris wallet ada HANYA jika belum ada.
       // JANGAN PERNAH menimpa saldo (total_balance) yang sudah ada di Supabase menjadi Rp 0!
@@ -670,12 +763,33 @@ export const dbService = {
           updated_at: new Date().toISOString(),
         });
       }
+
+      // Ambil kembali profil aktual dari database bila baru dibuat oleh trigger auth
+      const { data: reloaded } = await client.from('user_profiles').select('*').eq('id', userId).maybeSingle();
+      if (reloaded) {
+        return {
+          name: reloaded.full_name || displayName,
+          email: reloaded.email || email || undefined,
+          role: reloaded.role === 'admin' ? 'admin' : 'user',
+          greetingTitle: reloaded.greeting_title || `Selamat Datang, ${displayName}`,
+          greetingSubtitle: reloaded.greeting_subtitle || 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.',
+          streakDays: Number(reloaded.streak_days) || 0,
+          lastStreakDate: reloaded.last_streak_date,
+          currencySymbol: reloaded.currency_symbol || 'Rp',
+          monthName: 'Bulan Berjalan',
+          year: new Date().getFullYear(),
+          totalDaysInMonth: 31,
+          firstAppOpenAt: reloaded.first_app_open_at || undefined,
+        };
+      }
     } catch (dbErr) {
       console.warn('Notice ensuring user profile table in Supabase:', dbErr);
     }
 
     return {
       name: displayName,
+      email: email || undefined,
+      role: 'user',
       greetingTitle: `Selamat Datang, ${displayName}`,
       greetingSubtitle: 'Kelola agenda, kebiasaan, dan keuangan Anda hari ini.',
       streakDays: 0,
@@ -699,11 +813,17 @@ export const dbService = {
       totalBalance: number;
     }
   ) {
-    const client = getSupabase();
+    const check = await verifyActiveSupabaseSession(userId, false);
+    if (check.ok === false) {
+      return;
+    }
+    const client = check.client;
+    const activeUserId = check.userId;
 
-    // 1. User Profile
+    // 1. User Profile (jangan kirim role agar role di database tidak pernah tertimpa dari client)
     await client.from('user_profiles').upsert({
-      id: userId,
+      id: activeUserId,
+      email: data.userProfile.email || check.sessionUser.email || null,
       full_name: data.userProfile.name,
       avatar_url: data.userProfile.avatarUrl || null,
       greeting_title: data.userProfile.greetingTitle,
@@ -1165,7 +1285,18 @@ export const dbService = {
       };
     }
 
-    const client = getSupabase();
+    const adminCheck = await verifyActiveAdminSession();
+    if (adminCheck.ok === false) {
+      return {
+        feedbacks: [],
+        errorMessage: adminCheck.error,
+        rlsRestrictedLikely: true,
+        totalProfileRowsRead: 0,
+        userFeedbacksTableExists: false,
+      };
+    }
+
+    const client = adminCheck.client;
     try {
       const [profilesRes, dedicatedRes] = await Promise.all([
         client.from('user_profiles').select('*'),
@@ -1480,6 +1611,16 @@ export const dbService = {
     }
 
     try {
+      if (!onlyActive) {
+        const adminCheck = await verifyActiveAdminSession();
+        if (adminCheck.ok === false) {
+          return {
+            announcements: [],
+            error: adminCheck.error,
+          };
+        }
+      }
+
       const client = getSupabase();
       const buildQuery = (withPinnedOrder: boolean, withCreatedOrder: boolean) => {
         let q = client.from('announcements').select('*');
@@ -1584,14 +1725,15 @@ export const dbService = {
     }
 
     try {
-      const client = getSupabase();
-      const { data: sessionData } = await client.auth.getSession();
-      if (!sessionData?.session?.access_token) {
+      const adminCheck = await verifyActiveAdminSession();
+      if (adminCheck.ok === false) {
         return {
           success: false,
-          error: 'Sesi login Supabase tidak aktif atau sudah kedaluwarsa. Silakan masuk ulang dengan akun admin terlebih dahulu.',
+          error: adminCheck.error,
         };
       }
+
+      const client = adminCheck.client;
 
       const nowIso = new Date().toISOString();
       const fullPayload: Record<string, any> = {
@@ -1654,7 +1796,7 @@ export const dbService = {
           return {
             success: false,
             error:
-              'Ditolak kebijakan keamanan RLS tabel announcements di Supabase. Pastikan policy INSERT dan UPDATE untuk pengguna terautentikasi/admin sudah dibuat di SQL Editor.',
+              "Ditolak kebijakan keamanan RLS tabel announcements di Supabase. Pastikan policy INSERT dan UPDATE hanya untuk role 'admin' (public.is_admin()) sudah dibuat di SQL Editor.",
           };
         }
         if (error.code === 'PGRST205' || error.code === '42P01') {
@@ -1687,7 +1829,11 @@ export const dbService = {
     }
 
     try {
-      const client = getSupabase();
+      const adminCheck = await verifyActiveAdminSession();
+      if (adminCheck.ok === false) {
+        return { success: false, error: adminCheck.error };
+      }
+      const client = adminCheck.client;
       const { error } = await client.from('announcements').delete().eq('id', announcementId);
       if (error) {
         return { success: false, error: error.message };
@@ -1843,6 +1989,7 @@ export const dbService = {
       id: string;
       email: string | null;
       full_name: string | null;
+      role?: 'user' | 'admin';
       avatar_url: string | null;
       streak_days: number;
       last_streak_date: string | null;
@@ -1901,8 +2048,44 @@ export const dbService = {
       };
     }
 
+    const adminCheck = await verifyActiveAdminSession();
+    if (adminCheck.ok === false) {
+      return {
+        configured: true,
+        latencyMs: null,
+        sessionVerified: false,
+        sessionEmail: null,
+        sessionUserId: null,
+        allTablesOk: false,
+        tablesHealth: {},
+        totalDbRecords: 0,
+        counts: {
+          totalUsers: 0,
+          activeUsers: 0,
+          agendasTotal: 0,
+          agendasActive: 0,
+          agendasCompleted: 0,
+          habitsTotal: 0,
+          journalsTotal: 0,
+          walletsTotal: 0,
+          walletTransactionsTotal: 0,
+          targetsTotal: 0,
+          calendarEventsTotal: 0,
+          announcementsTotal: 0,
+          feedbacksTotal: 0,
+          pdfReportsTotal: 0,
+        },
+        userProfiles: [],
+        profilesError: adminCheck.error,
+        announcements: [],
+        announcementsError: adminCheck.error,
+        auditEvents: [],
+        systemErrors: [adminCheck.error],
+      };
+    }
+
     const startTime = Date.now();
-    const client = getSupabase();
+    const client = adminCheck.client;
     const systemErrors: string[] = [];
 
     const [
@@ -1920,7 +2103,7 @@ export const dbService = {
       this.checkTablesStatus(),
       client
         .from('user_profiles')
-        .select('id, email, full_name, avatar_url, streak_days, last_streak_date, first_app_open_at, created_at, updated_at, feedback')
+        .select('id, email, full_name, role, avatar_url, streak_days, last_streak_date, first_app_open_at, created_at, updated_at, feedback')
         .order('created_at', { ascending: false }),
       this.fetchAnnouncementsWithStatus(false),
       this.fetchAllUserFeedbacksWithStatus(),
@@ -1975,6 +2158,7 @@ export const dbService = {
       id: row.id,
       email: typeof row.email === 'string' && row.email.trim() ? row.email.trim() : null,
       full_name: typeof row.full_name === 'string' && row.full_name.trim() ? row.full_name.trim() : null,
+      role: (row.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin',
       avatar_url: typeof row.avatar_url === 'string' && row.avatar_url.trim() ? row.avatar_url.trim() : null,
       streak_days: typeof row.streak_days === 'number' && Number.isFinite(row.streak_days) ? row.streak_days : 0,
       last_streak_date: row.last_streak_date || null,

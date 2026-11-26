@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Trash2, Loader2, CheckCircle2, AlertCircle, X, Eye } from 'lucide-react';
+import { Camera, Trash2, Loader2, CheckCircle2, AlertCircle, X, Eye, MoreVertical } from 'lucide-react';
 import { uploadUserAvatar, getAvatarSignedUrl, removeUserAvatar } from '../lib/avatarService';
 
 export interface AvatarUploaderProps {
@@ -34,6 +34,8 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
   const [displayUrl, setDisplayUrl] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const [isPreviewMenuOpen, setIsPreviewMenuOpen] = useState<boolean>(false);
+  const [isConfirmingRemove, setIsConfirmingRemove] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Resolusi Signed URL jika `currentAvatarUrl` adalah path relatif di storage
@@ -41,6 +43,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
     let active = true;
 
     async function resolveCurrentAvatar() {
+      setIsConfirmingRemove(false);
       if (!currentAvatarUrl) {
         setDisplayUrl('');
         return;
@@ -85,7 +88,11 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
 
   // Tutup pratinjau foto saat menekan tombol Escape
   useEffect(() => {
-    if (!isPreviewOpen) return;
+    if (!isPreviewOpen) {
+      setIsPreviewMenuOpen(false);
+      setIsConfirmingRemove(false);
+      return;
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsPreviewOpen(false);
@@ -146,25 +153,28 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
 
   // Handler menghapus foto profil
   const handleRemove = async () => {
-    if (!window.confirm('Hapus foto profil ini dan kembali ke avatar inisial nama?')) {
-      return;
-    }
-
     setIsUploading(true);
     setStatusMessage(null);
 
     try {
       if (userId) {
-        await removeUserAvatar(userId, currentAvatarUrl);
+        try {
+          await removeUserAvatar(userId, currentAvatarUrl);
+        } catch (cloudErr) {
+          console.warn('Hapus avatar cloud dilewati/gagal, lanjutkan hapus lokal:', cloudErr);
+        }
       }
       setDisplayUrl('');
+      setIsConfirmingRemove(false);
+      setIsPreviewMenuOpen(false);
+      setIsPreviewOpen(false);
       setStatusMessage({ type: 'success', text: 'Foto profil telah dihapus.' });
       if (onAvatarRemoved) {
         onAvatarRemoved();
       } else {
         onAvatarUpdated('');
       }
-    } catch (err: any) {
+    } catch {
       setStatusMessage({ type: 'error', text: 'Gagal menghapus foto profil.' });
     } finally {
       setIsUploading(false);
@@ -291,9 +301,9 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
         />
       </div>
 
-      {/* Kontrol Aksi Tambahan (Hapus Foto) */}
+      {/* Kontrol Aksi Tambahan (Pilih / Ganti Foto) */}
       {showControls && (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex items-center justify-center gap-2">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -305,23 +315,8 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
             }`}
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>Pilih Foto</span>
+            <span>{displayUrl ? 'Ganti Foto' : 'Pilih Foto'}</span>
           </button>
-
-          {showRemoveButton && displayUrl && (
-            <button
-              type="button"
-              onClick={handleRemove}
-              disabled={isUploading}
-              aria-label="Hapus Foto Profil"
-              className={`p-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 text-rose-500 hover:bg-rose-500/10 border ${
-                isLight ? 'border-rose-200' : 'border-rose-500/20'
-              }`}
-              title="Hapus Foto Profil"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
       )}
 
@@ -394,17 +389,85 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
               )}
 
               {showControls && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsPreviewOpen(false);
-                    fileInputRef.current?.click();
-                  }}
-                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg transition-colors cursor-pointer"
-                >
-                  <Camera className="w-4 h-4" />
-                  <span>{displayUrl ? 'Ganti Foto Profil' : 'Unggah Foto Profil'}</span>
-                </button>
+                <div className="relative flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPreviewMenuOpen(false);
+                      setIsConfirmingRemove(false);
+                      setIsPreviewOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg transition-colors cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>{displayUrl ? 'Ganti Foto Profil' : 'Unggah Foto Profil'}</span>
+                  </button>
+
+                  {showRemoveButton && displayUrl && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPreviewMenuOpen((prev) => !prev);
+                          setIsConfirmingRemove(false);
+                        }}
+                        disabled={isUploading}
+                        aria-label="Opsi foto profil"
+                        aria-expanded={isPreviewMenuOpen}
+                        className="min-h-[44px] min-w-[44px] rounded-xl bg-white/15 hover:bg-white/25 text-white flex items-center justify-center shadow-lg transition-colors cursor-pointer disabled:opacity-50"
+                        title="Opsi lainnya"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {isPreviewMenuOpen && (
+                        <div
+                          className="absolute right-0 bottom-full mb-2 w-48 rounded-xl bg-slate-900 border border-white/15 shadow-2xl p-1.5 z-30 animate-in fade-in duration-150"
+                        >
+                          {!isConfirmingRemove ? (
+                            <button
+                              type="button"
+                              onClick={() => setIsConfirmingRemove(true)}
+                              disabled={isUploading}
+                              className="w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-rose-400 hover:bg-rose-500/15 flex items-center gap-2 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>Hapus Foto Profil</span>
+                            </button>
+                          ) : (
+                            <div className="p-1.5 space-y-1.5">
+                              <p className="text-[11px] font-medium text-slate-300 px-1">
+                                Hapus foto profil?
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={handleRemove}
+                                  disabled={isUploading}
+                                  className="flex-1 px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                >
+                                  Hapus
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsConfirmingRemove(false);
+                                    setIsPreviewMenuOpen(false);
+                                  }}
+                                  disabled={isUploading}
+                                  className="flex-1 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-[11px] font-semibold transition-colors cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>,

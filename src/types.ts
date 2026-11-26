@@ -59,9 +59,12 @@ export interface AppFeedback {
 
 export type OnboardingFocus = 'productivity' | 'habits' | 'finance' | 'all';
 
+export type UserRole = 'user' | 'admin';
+
 export interface UserProfile {
   name: string;
   email?: string;
+  role?: UserRole;
   avatarUrl?: string;
   greetingTitle: string;
   greetingSubtitle: string;

@@ -201,15 +201,21 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
     setErrorMessage(null);
     try {
       const data = await authService.signUp(email, password, fullName || userProfile.name);
-      if (data.user) {
+      if (data.user && data.session) {
         onUserChange(data.user);
         showToast('Pendaftaran akun berhasil!');
 
         // Upload local data to the newly created account
         try {
+          await dbService.ensureUserProfileInitialized(
+            data.user.id,
+            data.user.email,
+            fullName || userProfile.name
+          );
           await dbService.uploadAllLocalData(data.user.id, {
             userProfile: {
               ...userProfile,
+              email: data.user.email || userProfile.email,
               name: fullName || userProfile.name,
               greetingTitle: `Selamat Datang, ${fullName || userProfile.name}`,
             },
@@ -226,6 +232,9 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({
         }
 
         onClose();
+      } else if (data.user) {
+        setSuccessMessage('Pendaftaran berhasil! Silakan periksa email Anda jika konfirmasi email diaktifkan, lalu masuk.');
+        showToast('Pendaftaran akun berhasil! Silakan masuk.');
       } else {
         setSuccessMessage('Pendaftaran berhasil! Silakan periksa email Anda jika konfirmasi email diaktifkan.');
       }

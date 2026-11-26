@@ -1,46 +1,72 @@
 import { User } from '@supabase/supabase-js';
-import { UserProfile } from '../types';
+import { UserProfile, UserRole } from '../types';
+
+const SUPABASE_UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Daftar email atau ID yang dikenali sebagai Administrator bawaan.
- * Email utama pengguna: kamalizudin36@gmail.com secara otomatis memiliki hak akses Administrator penuh.
+ * Normalisasi role pengguna agar nilai tidak dikenal selalu jatuh ke 'user'.
  */
-export const DEFAULT_ADMIN_EMAILS = [
-  'kamalizudin36@gmail.com',
-];
-
-export const ADMIN_STORAGE_KEY = 'journalstream_admin_mode_enabled';
+export const normalizeUserRole = (rawRole: unknown): UserRole =>
+  rawRole === 'admin' ? 'admin' : 'user';
 
 /**
- * Memeriksa apakah pengguna saat ini berhak mengakses fitur Admin.
- * Khusus dan HANYA untuk akun Kamal Ahmad (kamalizudin36@gmail.com).
- * Pengguna umum lainnya tidak mendapatkan kontrol admin di fitur mereka.
+ * Memastikan role berasal dari sesi Supabase terverifikasi (`app_metadata.role` yang
+ * hanya dapat diubah server/Supabase Admin API) atau kolom `role` pada `public.user_profiles`
+ * di database Supabase (tidak pernah dari nama, email, atau `user_metadata`).
+ */
+export const getVerifiedUserRole = (
+  currentUser?: User | null,
+  userProfile?: UserProfile | null
+): UserRole => {
+  if (!currentUser?.id || !SUPABASE_UUID_REGEX.test(currentUser.id)) {
+    return 'user';
+  }
+
+  const appMetaRole = (currentUser.app_metadata as Record<string, unknown> | undefined)?.role;
+  if (appMetaRole === 'admin') {
+    return 'admin';
+  }
+
+  if (userProfile?.role === 'admin') {
+    return 'admin';
+  }
+
+  return 'user';
+};
+
+/**
+ * Memeriksa apakah pengguna saat ini berhak mengakses fitur Admin
+ * berdasarkan role resmi dari database/autentikasi Supabase.
  */
 export const checkIsAdminUser = (
-  currentUser?: User | null, 
+  currentUser?: User | null,
   userProfile?: UserProfile | null
-): boolean => {
-  // 1. Cek dari email akun Supabase yang sedang login
-  if (currentUser?.email) {
-    const emailLower = currentUser.email.toLowerCase().trim();
-    if (emailLower === 'kamalizudin36@gmail.com' || emailLower.includes('kamalizudin36')) {
-      return true;
-    }
-  }
+): boolean => getVerifiedUserRole(currentUser, userProfile) === 'admin';
 
-  // 2. Cek metadata akun Supabase jika ditandai khusus role admin untuk email Kamal
-  const email = (currentUser?.email || userProfile?.email || '').toLowerCase().trim();
-  if (email.includes('kamalizudin') || email.includes('kamal')) {
-    return true;
-  }
+/**
+ * Membersihkan role dari objek cache `localStorage` agar client tidak pernah
+ * memercayai klaim admin yang dimanipulasi di penyimpanan browser.
+ */
+export const sanitizeCachedProfile = (
+  profile: UserProfile | null | undefined
+): UserProfile | null => {
+  if (!profile) return null;
+  return {
+    ...profile,
+    role: 'user',
+  };
+};
 
-  // 3. Cek dari nama profil jika akun Kamal Ahmad diset pada profil
-  if (userProfile?.name) {
-    const nameLower = userProfile.name.toLowerCase().trim();
-    if (nameLower.includes('kamal')) {
-      return true;
-    }
-  }
-
-  return false;
+export const sanitizeCachedUser = (
+  user: User | null | undefined
+): User | null => {
+  if (!user) return null;
+  const appMeta = (user.app_metadata || {}) as Record<string, unknown>;
+  if (!('role' in appMeta)) return user;
+  const { role: _strippedRole, ...safeAppMeta } = appMeta;
+  return {
+    ...user,
+    app_metadata: safeAppMeta,
+  };
 };

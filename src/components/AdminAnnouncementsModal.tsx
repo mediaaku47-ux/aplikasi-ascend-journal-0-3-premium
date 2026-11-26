@@ -12,11 +12,13 @@ import {
   X,
   RefreshCw,
   Clock,
-  Check
+  Check,
+  Lock
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
 import { UserProfile, AppAnnouncement, AnnouncementType } from '../types';
 import { dbService } from '../lib/supabaseService';
+import { checkIsAdminUser } from '../utils/admin';
 
 interface AdminAnnouncementsModalProps {
   isOpen: boolean;
@@ -42,6 +44,7 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
   onShowToast,
   onAnnouncementsUpdated,
 }) => {
+  const isAdmin = checkIsAdminUser(currentUser, userProfile);
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -57,6 +60,11 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
 
   // Muat daftar pengumuman langsung dari Supabase
   const loadData = async () => {
+    if (!isAdmin) {
+      setIsLoading(false);
+      setAnnouncements([]);
+      return;
+    }
     setIsLoading(true);
     setLoadError(null);
     try {
@@ -79,12 +87,39 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && isAdmin) {
       loadData();
+    } else if (isOpen && !isAdmin) {
+      setIsLoading(false);
+      setAnnouncements([]);
     }
-  }, [isOpen]);
+  }, [isOpen, isAdmin]);
 
   if (!isOpen) return null;
+
+  if (!isAdmin) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-3xl border border-rose-500/30 bg-[#0b1224] text-white p-7 text-center shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 mx-auto flex items-center justify-center mb-4">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold mb-2">Akses Ditolak</h3>
+          <p className="text-xs text-slate-400 mb-5 leading-relaxed">
+            Pengelolaan pengumuman resmi hanya dapat diakses oleh akun dengan role{' '}
+            <code className="font-mono font-bold text-slate-200">admin</code> di Supabase.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white transition-colors cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const resetForm = () => {
     setEditingId(null);
@@ -124,6 +159,12 @@ export const AdminAnnouncementsModal: React.FC<AdminAnnouncementsModalProps> = (
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+    if (!isAdmin) {
+      const deniedMsg = 'Akses ditolak: Hanya Administrator yang dapat menerbitkan pengumuman.';
+      setSubmitError(deniedMsg);
+      onShowToast?.(deniedMsg);
+      return;
+    }
     if (!title.trim() || !message.trim()) {
       const msg = 'Judul dan isi pesan pemberitahuan wajib diisi.';
       setSubmitError(msg);

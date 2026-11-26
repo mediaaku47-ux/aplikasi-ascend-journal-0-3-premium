@@ -14,6 +14,7 @@ import {
   Download,
   Globe,
   ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 import { OnboardingFocus } from '../types';
 import { AscendBrand } from './AscendBrand';
@@ -21,9 +22,9 @@ import { usePWAInstall } from '../hooks/usePWAInstall';
 import {
   getNotificationPermissionStatus,
   getMicrophoneAndCameraPermissionStatus,
-  hasPassedDevicePermissionsOnboarding,
   isWebNotificationSupported,
   markDevicePermissionsOnboardingPassed,
+  MediaPermissionState,
   requestMicrophoneAndCameraPermissions,
   saveNotificationSettings,
   setDismissedPermissionPrompt,
@@ -120,15 +121,10 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
     } catch {}
   }, [theme]);
 
-  const [permissionsStepPassed, setPermissionsStepPassed] = useState<boolean>(() =>
-    hasPassedDevicePermissionsOnboarding()
-  );
-  const minStep = permissionsStepPassed ? 1 : 0;
+  const minStep = 0;
 
-  // Step 0: Notification Consent, Step 1: Nickname, Step 2: Focus (A/B/C/D), Step 3: Completion
-  const [step, setStep] = useState<number>(() =>
-    hasPassedDevicePermissionsOnboarding() ? 1 : 0
-  );
+  // Step 0: Notification & Device Consent, Step 1: Nickname, Step 2: Focus (A/B/C/D), Step 3: Completion
+  const [step, setStep] = useState<number>(0);
   const [direction, setDirection] = useState<1 | -1>(1);
 
   const [nickname, setNickname] = useState<string>(() =>
@@ -143,6 +139,10 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
   >(() => getNotificationPermissionStatus());
   const [micGranted, setMicGranted] = useState<boolean>(false);
   const [camGranted, setCamGranted] = useState<boolean>(false);
+  const [micState, setMicState] = useState<MediaPermissionState>('prompt');
+  const [camState, setCamState] = useState<MediaPermissionState>('prompt');
+  const [hasAttemptedPermission, setHasAttemptedPermission] = useState<boolean>(false);
+  const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -171,6 +171,74 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
     return () => clearAutoAdvanceTimer();
   }, [clearAutoAdvanceTimer]);
 
+  const [blockedByIframePolicy, setBlockedByIframePolicy] = useState<boolean>(false);
+
+  // Sinkronkan status izin browser asli (Notifikasi, Mikrofon, Kamera) secara real-time saat berada di langkah 0
+  const syncLivePermissionStates = useCallback(async () => {
+    const liveNotif = getNotificationPermissionStatus();
+    setNotificationPermission(liveNotif);
+    if (liveNotif === 'granted') {
+      setReminderEnabled(true);
+    }
+    try {
+      const mediaStatus = await getMicrophoneAndCameraPermissionStatus();
+      setMicGranted(mediaStatus.microphone);
+      setCamGranted(mediaStatus.camera);
+      setMicState(mediaStatus.microphoneState);
+      setCamState(mediaStatus.cameraState);
+
+      const notifOk = liveNotif === 'granted' || liveNotif === 'unsupported';
+      const micOk = mediaStatus.microphone || mediaStatus.microphoneState === 'unsupported';
+      const camOk = mediaStatus.camera || mediaStatus.cameraState === 'unsupported';
+      if (notifOk && micOk && camOk) {
+        setPermissionNotice(null);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (step !== 0) return;
+    let isCancelled = false;
+    void syncLivePermissionStates();
+
+    const cleanups: Array<() => void> = [];
+    const handleVisibilityOrFocus = () => {
+      if (!isCancelled) {
+        void syncLivePermissionStates();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    cleanups.push(() => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    });
+
+    if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+      (['microphone', 'camera', 'notifications'] as const).forEach((permName) => {
+        navigator.permissions
+          .query({ name: permName as PermissionName })
+          .then((status) => {
+            if (isCancelled) return;
+            const handlePermChange = () => {
+              if (!isCancelled) {
+                void syncLivePermissionStates();
+              }
+            };
+            status.addEventListener('change', handlePermChange);
+            cleanups.push(() => status.removeEventListener('change', handlePermChange));
+          })
+          .catch(() => {});
+      });
+    }
+
+    return () => {
+      isCancelled = true;
+      cleanups.forEach((fn) => fn());
+    };
+  }, [step, syncLivePermissionStates]);
+
   // Auto-focus input when arriving on nickname step
   useEffect(() => {
     if (step === 1) {
@@ -196,30 +264,87 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
   const handleAllowNotifications = async () => {
     if (isRequestingPermission) return;
     setIsRequestingPermission(true);
+    setPermissionNotice(null);
 
-    let finalPerm: 'granted' | 'denied' | 'default' | 'unsupported' =
-      getNotificationPermissionStatus();
+    // Pemicu kedua API izin asli browser secara bersamaan di dalam satu gestur klik pengguna
+    const notifPromise: Promise<'granted' | 'denied' | 'default' | 'unsupported'> =
+      isWebNotificationSupported()
+        ? Notification.permission === 'granted'
+          ? Promise.resolve('granted')
+          : Notification.requestPermission().catch(
+              () => getNotificationPermissionStatus()
+            )
+        : Promise.resolve('unsupported');
 
-    try {
-      // 1. Pemicu izin Notifikasi asli browser
-      if (isWebNotificationSupported()) {
-        finalPerm = await Notification.requestPermission();
-      } else {
-        finalPerm = 'unsupported';
-      }
-    } catch {
-      finalPerm = getNotificationPermissionStatus();
-    }
+    const mediaPromise = requestMicrophoneAndCameraPermissions();
 
-    // 2. Pemicu izin Mikrofon ({ audio: true }) & Kamera ({ video: true }), lalu stop track segera
-    const mediaResult = await requestMicrophoneAndCameraPermissions();
+    const [finalPerm, mediaResult] = await Promise.all([notifPromise, mediaPromise]);
+
+    const notifGranted = finalPerm === 'granted';
+    setNotificationPermission(finalPerm);
+    setReminderEnabled(notifGranted);
     setMicGranted(mediaResult.microphone);
     setCamGranted(mediaResult.camera);
+    setMicState(mediaResult.microphoneState);
+    setCamState(mediaResult.cameraState);
+    setBlockedByIframePolicy(mediaResult.blockedByPolicy);
+    setHasAttemptedPermission(true);
 
-    const granted = finalPerm === 'granted';
-    setNotificationPermission(finalPerm);
-    setReminderEnabled(granted);
+    saveNotificationSettings({
+      enabled: notifGranted,
+      agendaReminders: notifGranted,
+      agendaPreCutoffReminder: notifGranted,
+      habitReminders: notifGranted,
+      targetReminders: notifGranted,
+    });
+    setDismissedPermissionPrompt(!notifGranted);
 
+    const notifSatisfied = finalPerm === 'granted' || finalPerm === 'unsupported';
+    const micSatisfied =
+      mediaResult.microphone || mediaResult.microphoneState === 'unsupported';
+    const camSatisfied =
+      mediaResult.camera || mediaResult.cameraState === 'unsupported';
+
+    setIsRequestingPermission(false);
+
+    if (notifSatisfied && micSatisfied && camSatisfied) {
+      markDevicePermissionsOnboardingPassed();
+      setDirection(1);
+      setStep(1);
+      return;
+    }
+
+    const missingLabels: string[] = [];
+    if (!notifSatisfied) missingLabels.push('Notifikasi');
+    if (!micSatisfied) missingLabels.push('Mikrofon');
+    if (!camSatisfied) missingLabels.push('Kamera');
+
+    if (mediaResult.blockedByPolicy || isInIframe) {
+      setPermissionNotice(
+        `Izin ${missingLabels.join(', ')} dibatasi di pratinjau.`
+      );
+    } else {
+      setPermissionNotice(
+        `Izin ${missingLabels.join(', ')} belum disetujui di Chrome.`
+      );
+    }
+  };
+
+  const handleSkipNotifications = async () => {
+    if (isRequestingPermission) return;
+    const currentPerm = getNotificationPermissionStatus();
+    setNotificationPermission(currentPerm);
+    setReminderEnabled(currentPerm === 'granted');
+
+    try {
+      const mediaStatus = await getMicrophoneAndCameraPermissionStatus();
+      setMicGranted(mediaStatus.microphone);
+      setCamGranted(mediaStatus.camera);
+      setMicState(mediaStatus.microphoneState);
+      setCamState(mediaStatus.cameraState);
+    } catch {}
+
+    const granted = currentPerm === 'granted';
     saveNotificationSettings({
       enabled: granted,
       agendaReminders: granted,
@@ -229,35 +354,6 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
     });
     setDismissedPermissionPrompt(!granted);
     markDevicePermissionsOnboardingPassed();
-    setPermissionsStepPassed(true);
-
-    setIsRequestingPermission(false);
-    setDirection(1);
-    setStep(1);
-  };
-
-  const handleSkipNotifications = async () => {
-    if (isRequestingPermission) return;
-    const currentPerm = getNotificationPermissionStatus();
-    setNotificationPermission(currentPerm);
-    setReminderEnabled(false);
-
-    try {
-      const mediaStatus = await getMicrophoneAndCameraPermissionStatus();
-      setMicGranted(mediaStatus.microphone);
-      setCamGranted(mediaStatus.camera);
-    } catch {}
-
-    saveNotificationSettings({
-      enabled: false,
-      agendaReminders: false,
-      agendaPreCutoffReminder: false,
-      habitReminders: false,
-      targetReminders: false,
-    });
-    setDismissedPermissionPrompt(true);
-    markDevicePermissionsOnboardingPassed();
-    setPermissionsStepPassed(true);
 
     setDirection(1);
     setStep(1);
@@ -572,34 +668,136 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
                     </h1>
                   </div>
 
-                  <p
-                    className={`text-sm sm:text-base leading-relaxed max-w-xl ${
-                      isLight ? 'text-slate-600' : 'text-slate-300/90'
-                    }`}
-                  >
-                    Untuk pengingat harian, catatan suara, dan pindai struk. Bisa diubah kapan saja.
-                  </p>
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+                    {[
+                      {
+                        key: 'notif',
+                        label: 'Notifikasi',
+                        icon: Bell,
+                        state: notificationPermission === 'default' ? 'prompt' : notificationPermission,
+                      },
+                      {
+                        key: 'mic',
+                        label: 'Mikrofon',
+                        icon: Mic,
+                        state: micGranted ? 'granted' : micState,
+                      },
+                      {
+                        key: 'cam',
+                        label: 'Kamera',
+                        icon: Camera,
+                        state: camGranted ? 'granted' : camState,
+                      },
+                    ].map((item) => {
+                      const ItemIcon = item.icon;
+                      const isGrantedState = item.state === 'granted';
+                      const isDeniedState = item.state === 'denied';
+                      const isUnsupportedState = item.state === 'unsupported';
+                      const statusLabel = isGrantedState
+                        ? 'Diizinkan'
+                        : isDeniedState
+                          ? 'Ditolak'
+                          : isUnsupportedState
+                            ? 'Tidak ada'
+                            : 'Belum';
 
-                  <div
-                    className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-medium pt-0.5 ${
-                      isLight ? 'text-[#0E7469]' : 'text-teal-300/90'
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Bell className="w-3.5 h-3.5" />
-                      Notifikasi
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Mic className="w-3.5 h-3.5" />
-                      Mikrofon
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5" />
-                      Kamera
-                    </span>
+                      return (
+                        <div
+                          key={item.key}
+                          className="inline-flex items-center gap-1.5 text-xs"
+                        >
+                          <ItemIcon
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isGrantedState
+                                ? 'text-[#26A69A]'
+                                : isDeniedState
+                                  ? 'text-rose-500'
+                                  : isLight
+                                    ? 'text-slate-500'
+                                    : 'text-slate-400'
+                            }`}
+                          />
+                          <span
+                            className={`font-semibold ${
+                              isLight ? 'text-slate-700' : 'text-slate-200'
+                            }`}
+                          >
+                            {item.label}
+                          </span>
+                          <span aria-hidden="true" className={isLight ? 'text-slate-300' : 'text-slate-600'}>
+                            ·
+                          </span>
+                          <span
+                            className={`font-semibold ${
+                              isGrantedState
+                                ? isLight
+                                  ? 'text-emerald-700'
+                                  : 'text-emerald-300'
+                                : isDeniedState
+                                  ? isLight
+                                    ? 'text-rose-700'
+                                    : 'text-rose-300'
+                                  : isLight
+                                    ? 'text-slate-500'
+                                    : 'text-slate-400'
+                            }`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
+
+                  {(permissionNotice ||
+                    isInIframe ||
+                    notificationPermission === 'denied' ||
+                    micState === 'denied' ||
+                    camState === 'denied') && (
+                    <div
+                      role="status"
+                      className={`pl-3 border-l-2 text-xs leading-relaxed space-y-1.5 ${
+                        isLight
+                          ? 'border-amber-400 text-amber-950'
+                          : 'border-amber-500/70 text-amber-100'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${isLight ? 'text-amber-600' : 'text-amber-400'}`} />
+                        <div className="space-y-0.5 min-w-0">
+                          <p className="font-semibold">
+                            {permissionNotice ||
+                              (isInIframe || blockedByIframePolicy
+                                ? 'Mode pratinjau membatasi dialog izin Chrome.'
+                                : 'Izin perangkat diblokir di Chrome.')}
+                          </p>
+                          <p className={isLight ? 'text-slate-600' : 'text-slate-300/85'}>
+                            {isInIframe || blockedByIframePolicy
+                              ? 'Buka di tab penuh atau ubah izin lewat ikon bilah alamat.'
+                              : 'Aktifkan lewat ikon kiri bilah alamat Chrome, lalu coba lagi.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {(isInIframe || blockedByIframePolicy) && typeof window !== 'undefined' && (
+                        <div className="pl-5.5">
+                          <a
+                            href={window.location.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`inline-flex items-center gap-1.5 text-xs font-semibold underline underline-offset-2 transition-colors ${
+                              isLight
+                                ? 'text-[#0B5345] hover:text-[#26A69A]'
+                                : 'text-[#26A69A] hover:text-[#4DB6AC]'
+                            }`}
+                          >
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                            <span>Buka di Tab Penuh</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
@@ -616,12 +814,19 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
                     {isRequestingPermission ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Menunggu izin...</span>
+                        <span>Menunggu konfirmasi Chrome...</span>
                       </>
                     ) : (
                       <>
                         <ShieldCheck className="w-4 h-4" />
-                        <span>Izinkan Akses</span>
+                        <span>
+                          {hasAttemptedPermission ||
+                          notificationPermission === 'denied' ||
+                          micState === 'denied' ||
+                          camState === 'denied'
+                            ? 'Coba Izinkan Lagi'
+                            : 'Izinkan Akses'}
+                        </span>
                       </>
                     )}
                   </button>
@@ -637,7 +842,13 @@ export const TypeformOnboarding: React.FC<TypeformOnboardingProps> = ({
                         : 'bg-[#0B221D] border-[#1A423A] text-slate-200 hover:bg-[#113029] hover:text-white'
                     }`}
                   >
-                    Nanti Saja
+                    {hasAttemptedPermission ||
+                    isInIframe ||
+                    notificationPermission === 'denied' ||
+                    micState === 'denied' ||
+                    camState === 'denied'
+                      ? 'Lanjut Saja'
+                      : 'Nanti Saja'}
                   </button>
                 </div>
               </motion.section>

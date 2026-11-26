@@ -11,7 +11,7 @@ import { AdminAnnouncementsModal } from './AdminAnnouncementsModal';
 import { HomeOnboardingTour } from './HomeOnboardingTour';
 import { dbService, subscribeToRealtimeSync, CloudFullData, isValidSupabaseUserId } from '../lib/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { checkIsAdminUser } from '../utils/admin';
+import { checkIsAdminUser, sanitizeCachedProfile } from '../utils/admin';
 import { SupabaseAuthModal } from './SupabaseAuthModal';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -220,7 +220,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.name === 'Alex' || parsed.name === 'Kamal' || parsed.currencySymbol === '$') {
+        if (parsed.name === 'Alex' || parsed.currencySymbol === '$') {
           return initialUserProfile;
         }
         const currentMonthIdx = parsed.monthIndex ?? realToday.monthIndex;
@@ -228,14 +228,14 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         const currentMonthName = parsed.monthName || realToday.monthName;
         const daysInM = getDaysInMonth(currentYear, currentMonthIdx);
 
-        return {
+        return sanitizeCachedProfile({
           ...parsed,
           monthIndex: currentMonthIdx,
           year: currentYear,
           monthName: currentMonthName,
           totalDaysInMonth: daysInM,
           selectedDay: parsed.selectedDay || realToday.day,
-        };
+        }) || initialUserProfile;
       } catch (e) {
         return initialUserProfile;
       }
@@ -249,6 +249,14 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       selectedDay: realToday.day,
     };
   });
+
+  useEffect(() => {
+    if (initialProfile?.role) {
+      setUserProfile((prev) =>
+        prev.role === initialProfile.role ? prev : { ...prev, role: initialProfile.role }
+      );
+    }
+  }, [initialProfile?.role]);
 
   // State aplikasi utama - Inisialisasi dari LocalStorage dan sinkronisasi dengan Supabase
   const [tasks, setTasks] = useState<Task[]>(() => {
@@ -550,10 +558,10 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     }
   }, [isLoadingFromSupabase, userProfile.accountCreatedAt, userProfile.feedback?.submittedAt, currentUser?.created_at, currentUser?.id]);
 
-  // Backup cache ke LocalStorage hanya setelah data dari Supabase selesai dimuat
+  // Backup cache ke LocalStorage hanya setelah data dari Supabase selesai dimuat (role tidak disimpan sebagai klaim tepercaya di cache)
   useEffect(() => {
     if (isLoadingFromSupabase) return;
-    localStorage.setItem('journalstream_user_profile', JSON.stringify(userProfile));
+    localStorage.setItem('journalstream_user_profile', JSON.stringify(sanitizeCachedProfile(userProfile)));
   }, [userProfile, isLoadingFromSupabase]);
 
   useEffect(() => {
@@ -1289,7 +1297,27 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     );
   };
 
+  const isAdmin = checkIsAdminUser(currentUser, userProfile);
+
+  useEffect(() => {
+    if (!isAdmin && isAnnouncementsAdminOpen) {
+      setIsAnnouncementsAdminOpen(false);
+    }
+  }, [isAdmin, isAnnouncementsAdminOpen]);
+
+  const handleOpenAnnouncementsAdmin = () => {
+    if (!isAdmin) {
+      showToast('Akses ditolak: Hanya Administrator yang dapat mengelola pengumuman.');
+      return;
+    }
+    setIsAnnouncementsAdminOpen(true);
+  };
+
   const handleTabChange = (tab: NavTab) => {
+    if ((tab === 'admin-portal' || tab === 'admin-feedback') && !isAdmin) {
+      showToast('Akses ditolak: Halaman ini khusus Administrator.');
+      return;
+    }
     if (tab === 'help') {
       setIsHelpOpen(true);
       return;
@@ -1478,7 +1506,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   ): Promise<{ ok: boolean; error?: string }> => {
     setUserProfile(updatedProfile);
     try {
-      localStorage.setItem('journalstream_user_profile', JSON.stringify(updatedProfile));
+      localStorage.setItem('journalstream_user_profile', JSON.stringify(sanitizeCachedProfile(updatedProfile)));
       if (updatedProfile.feedback) {
         localStorage.setItem('journalstream_app_feedback', JSON.stringify(updatedProfile.feedback));
         window.dispatchEvent(new CustomEvent('ascend-feedback-updated'));
@@ -1925,7 +1953,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         isSupabaseConfigured={isSupabaseConfigured()}
         onOpenSupabaseModal={() => handleOpenSupabaseModal()}
         onLogout={onLogout}
-        onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
+        onOpenAnnouncementsAdmin={isAdmin ? handleOpenAnnouncementsAdmin : undefined}
         announcements={announcements}
         theme={theme}
       />
@@ -1949,7 +1977,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
           isSupabaseConfigured={isSupabaseConfigured()}
           onOpenSupabaseModal={() => handleOpenSupabaseModal()}
           onLogout={onLogout}
-          onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
+          onOpenAnnouncementsAdmin={isAdmin ? handleOpenAnnouncementsAdmin : undefined}
           announcements={announcements}
           theme={theme}
         />
@@ -2068,8 +2096,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                     onOpenHelp={() => setIsHelpOpen(true)}
                     onOpenFeedback={() => setIsFeedbackModalOpen(true)}
                     onOpenSync={() => setIsSyncModalOpen(true)}
-                    onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
-                    isAdmin={checkIsAdminUser(currentUser, userProfile)}
+                    onOpenAnnouncementsAdmin={isAdmin ? handleOpenAnnouncementsAdmin : undefined}
+                    isAdmin={isAdmin}
                     theme={theme}
                     onToggleTheme={toggleTheme}
                     onLogout={onLogout}
@@ -2269,7 +2297,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                 totalBalance={totalBalance}
                 onOpenSupabaseModal={() => handleOpenSupabaseModal('config')}
                 onOpenFeedbackModal={() => setIsFeedbackModalOpen(true)}
-                onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
+                onOpenAnnouncementsAdmin={isAdmin ? handleOpenAnnouncementsAdmin : undefined}
                 onNavigateToTab={(tab) => handleTabChange(tab)}
                 onOpenSync={() => setIsSyncModalOpen(true)}
                 onOpenHelp={() => setIsHelpOpen(true)}
@@ -2301,7 +2329,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                 userProfile={userProfile}
                 announcements={announcements}
                 onAnnouncementsUpdated={(updated) => setAnnouncements(updated)}
-                onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
+                onOpenAnnouncementsAdmin={isAdmin ? handleOpenAnnouncementsAdmin : undefined}
                 onShowToast={showToast}
                 onNavigateToDashboard={() => handleTabChange('dashboard')}
                 theme={theme}
@@ -2323,7 +2351,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                 onRefreshAnnouncements={() => loadAnnouncements(false)}
                 onNavigateToDashboard={() => handleTabChange('dashboard')}
                 onNavigateToTab={handleTabChange}
-                onOpenAnnouncementsAdmin={() => setIsAnnouncementsAdminOpen(true)}
+                onOpenAnnouncementsAdmin={isAdmin ? handleOpenAnnouncementsAdmin : undefined}
                 onSimulateReminder={handleSimulateReminder}
                 onShowToast={showToast}
                 theme={theme}
@@ -2523,7 +2551,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         />
 
         {/* Modal Khusus Admin: Menulis & Mengelola Pengumuman Aplikasi */}
-        {isAnnouncementsAdminOpen && (
+        {isAdmin && isAnnouncementsAdminOpen && (
           <AdminAnnouncementsModal
             isOpen={isAnnouncementsAdminOpen}
             onClose={() => setIsAnnouncementsAdminOpen(false)}

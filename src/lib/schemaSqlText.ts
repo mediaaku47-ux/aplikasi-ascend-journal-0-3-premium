@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT,
     full_name TEXT,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
     avatar_url TEXT,
     greeting_title TEXT DEFAULT 'Selamat Datang',
     greeting_subtitle TEXT DEFAULT 'Ayo lebih produktif lagi hari ini.',
@@ -33,6 +34,20 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
 -- Pastikan kolom baru tetap ada jika tabel user_profiles sudah pernah dibuat sebelumnya
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS first_app_open_at TIMESTAMPTZ;
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS feedback JSONB;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'user_profiles_role_check'
+      AND conrelid = 'public.user_profiles'::regclass
+  ) THEN
+    ALTER TABLE public.user_profiles
+      ADD CONSTRAINT user_profiles_role_check CHECK (role IN ('user', 'admin'));
+  END IF;
+END $$;
 
 -- 3. TABEL JURNAL (journals) - Menyimpan catatan jurnal harian pengguna
 CREATE TABLE IF NOT EXISTS public.journals (
@@ -167,24 +182,83 @@ ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_feedbacks ENABLE ROW LEVEL SECURITY;
 
--- 10. KEBIJAKAN AKSES PRIVAT (RLS POLICIES)
+-- 10A. FUNGSI HELPER ROLE ADMIN RESMI & PROTEKSI KOLOM ROLE
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT (
+    COALESCE(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin'
+    OR (
+      auth.uid() IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM public.user_profiles up
+        WHERE up.id = auth.uid()
+          AND up.role = 'admin'
+      )
+    )
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.protect_user_profile_role()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.role IS NULL OR NEW.role = '' THEN
+      NEW.role := 'user';
+    ELSIF NEW.role <> 'user' THEN
+      IF auth.uid() IS NOT NULL AND NOT public.is_admin() THEN
+        NEW.role := 'user';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND NEW.role IS DISTINCT FROM OLD.role THEN
+    IF auth.uid() IS NOT NULL AND NOT public.is_admin() THEN
+      RAISE EXCEPTION 'Akses ditolak: hanya administrator yang dapat mengubah role pengguna.';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_user_profile_role ON public.user_profiles;
+CREATE TRIGGER trg_protect_user_profile_role
+  BEFORE INSERT OR UPDATE ON public.user_profiles
+  FOR EACH ROW EXECUTE FUNCTION public.protect_user_profile_role();
+
+-- 10B. KEBIJAKAN AKSES PRIVAT (RLS POLICIES)
 DROP POLICY IF EXISTS "Users can view own profile" ON public.user_profiles;
-CREATE POLICY "Users can view own profile" ON public.user_profiles FOR SELECT 
+CREATE POLICY "Users can view own profile" ON public.user_profiles FOR SELECT
 USING (
-  auth.uid() = id 
-  OR (feedback IS NOT NULL) 
-  OR (auth.jwt() ->> 'email' = 'kamalizudin36@gmail.com')
-  OR (auth.jwt() ->> 'email' LIKE 'admin@%')
+  auth.uid() = id
+  OR public.is_admin()
 );
 
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.user_profiles;
-CREATE POLICY "Users can insert own profile" ON public.user_profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can insert own profile" ON public.user_profiles FOR INSERT
+WITH CHECK (auth.uid() = id);
 
 DROP POLICY IF EXISTS "Users can update own profile" ON public.user_profiles;
-CREATE POLICY "Users can update own profile" ON public.user_profiles FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can update own profile" ON public.user_profiles FOR UPDATE
+USING (auth.uid() = id OR public.is_admin())
+WITH CHECK (auth.uid() = id OR public.is_admin());
 
 DROP POLICY IF EXISTS "Users can delete own profile" ON public.user_profiles;
-CREATE POLICY "Users can delete own profile" ON public.user_profiles FOR DELETE USING (auth.uid() = id);
+CREATE POLICY "Users can delete own profile" ON public.user_profiles FOR DELETE
+USING (auth.uid() = id OR public.is_admin());
 
 DROP POLICY IF EXISTS "Users can view own journals" ON public.journals;
 CREATE POLICY "Users can view own journals" ON public.journals FOR SELECT USING (auth.uid() = user_id);
@@ -249,28 +323,25 @@ CREATE POLICY "Users can delete own habits" ON public.habits FOR DELETE USING (a
 -- Kebijakan Akses Pengumuman Aplikasi (announcements)
 -- Semua pengguna terautentikasi / publik dapat melihat pengumuman yang aktif
 DROP POLICY IF EXISTS "Anyone can view active announcements" ON public.announcements;
-CREATE POLICY "Anyone can view active announcements" ON public.announcements FOR SELECT 
+CREATE POLICY "Anyone can view active announcements" ON public.announcements FOR SELECT
 USING (
-  is_active = TRUE 
-  OR (auth.jwt() ->> 'email' = 'kamalizudin36@gmail.com')
-  OR (auth.jwt() ->> 'email' LIKE 'admin@%')
+  is_active = TRUE
+  OR public.is_admin()
 );
 
--- Admin dapat membuat, memperbarui, dan menghapus pengumuman
+-- Hanya Admin (role = 'admin') yang dapat membuat, memperbarui, dan menghapus pengumuman
 DROP POLICY IF EXISTS "Admins can insert announcements" ON public.announcements;
-CREATE POLICY "Admins can insert announcements" ON public.announcements FOR INSERT 
-WITH CHECK (
-  auth.role() = 'authenticated'
-);
+CREATE POLICY "Admins can insert announcements" ON public.announcements FOR INSERT
+WITH CHECK (public.is_admin());
 
 DROP POLICY IF EXISTS "Admins can update announcements" ON public.announcements;
-CREATE POLICY "Admins can update announcements" ON public.announcements FOR UPDATE 
-USING (auth.role() = 'authenticated')
-WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Admins can update announcements" ON public.announcements FOR UPDATE
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
 
 DROP POLICY IF EXISTS "Admins can delete announcements" ON public.announcements;
-CREATE POLICY "Admins can delete announcements" ON public.announcements FOR DELETE 
-USING (auth.role() = 'authenticated');
+CREATE POLICY "Admins can delete announcements" ON public.announcements FOR DELETE
+USING (public.is_admin());
 
 -- Kebijakan Akses Kalender Jadwal Acara (calendar_events) - Strict user_id RLS
 DROP POLICY IF EXISTS "Users can view own calendar events" ON public.calendar_events;
@@ -287,11 +358,11 @@ CREATE POLICY "Users can delete own calendar events" ON public.calendar_events F
 
 -- Kebijakan Akses Penilaian & Saran Pengguna (user_feedbacks)
 DROP POLICY IF EXISTS "Users and admin can view feedbacks" ON public.user_feedbacks;
+DROP POLICY IF EXISTS "Admin or owner can view feedbacks" ON public.user_feedbacks;
 CREATE POLICY "Users and admin can view feedbacks" ON public.user_feedbacks FOR SELECT
 USING (
   auth.uid() = user_id
-  OR (auth.jwt() ->> 'email' = 'kamalizudin36@gmail.com')
-  OR (auth.jwt() ->> 'email' LIKE 'admin@%')
+  OR public.is_admin()
 );
 
 DROP POLICY IF EXISTS "Users can insert own feedback" ON public.user_feedbacks;
@@ -321,17 +392,29 @@ END $$;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.user_profiles (id, email, full_name, streak_days)
+  INSERT INTO public.user_profiles (id, email, full_name, role, streak_days)
   VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+    COALESCE(
+      NULLIF(NEW.raw_user_meta_data->>'full_name', ''),
+      NULLIF(NEW.raw_user_meta_data->>'name', ''),
+      NULLIF(split_part(COALESCE(NEW.email, ''), '@', 1), ''),
+      'Pengguna Baru'
+    ),
+    'user',
     0
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE
+  SET
+    email = COALESCE(EXCLUDED.email, public.user_profiles.email),
+    full_name = COALESCE(NULLIF(public.user_profiles.full_name, ''), EXCLUDED.full_name);
   RETURN NEW;
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -473,5 +556,36 @@ TO anon
 USING (
   bucket_id = 'monthly-reports'
 );
+
+-- 16. SINKRONISASI PENGGUNA BARU & PENETAPAN ROLE ADMIN RESMI DI DATABASE SUPABASE
+-- Backfill pengguna yang sudah terdaftar di auth.users namun belum memiliki baris di user_profiles (default 'user')
+INSERT INTO public.user_profiles (id, email, full_name, role, streak_days)
+SELECT
+  u.id,
+  u.email,
+  COALESCE(
+    NULLIF(u.raw_user_meta_data->>'full_name', ''),
+    NULLIF(u.raw_user_meta_data->>'name', ''),
+    NULLIF(split_part(COALESCE(u.email, ''), '@', 1), ''),
+    'Pengguna Baru'
+  ),
+  'user',
+  0
+FROM auth.users u
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.user_profiles up WHERE up.id = u.id
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Menetapkan role 'admin' secara resmi di kolom public.user_profiles.role (bukan pengecekan di kode frontend).
+INSERT INTO public.user_profiles (id, email, full_name, role)
+SELECT
+  u.id,
+  u.email,
+  COALESCE(u.raw_user_meta_data->>'full_name', split_part(u.email, '@', 1)),
+  'admin'
+FROM auth.users u
+WHERE LOWER(u.email) = 'kamalizudin36@gmail.com'
+ON CONFLICT (id) DO UPDATE SET role = 'admin';
 `;
 

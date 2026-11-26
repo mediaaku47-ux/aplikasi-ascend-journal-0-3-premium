@@ -169,16 +169,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             localStorage.setItem('ascend_account_created_at', registeredTime);
             localStorage.setItem('ascend_theme', 'light');
           } catch {}
-          const profile = await dbService.ensureUserProfileInitialized(
-            res.user.id,
-            res.user.email,
-            fullName
-          );
-          if (profile) {
-            profile.accountCreatedAt = registeredTime;
-          }
 
           if (res.session) {
+            const profile = await dbService.ensureUserProfileInitialized(
+              res.user.id,
+              res.user.email,
+              fullName
+            );
+            if (profile) {
+              profile.accountCreatedAt = registeredTime;
+            }
             showToast(`Akun berhasil dibuat! Selamat datang, ${fullName || res.user.email}.`);
             onAuthSuccess(res.user, profile, { isNewUser: true });
           } else {

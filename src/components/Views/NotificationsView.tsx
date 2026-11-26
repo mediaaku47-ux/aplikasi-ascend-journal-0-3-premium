@@ -250,12 +250,14 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
   };
 
   const showAgendaCardToday = isAgendaNotificationWindow && agendasToday.length > 0;
+  const hasNoAgendaToday = agendasToday.length === 0;
 
-  const hasPendingReminders =
-    showAgendaCardToday ||
+  const hasOtherReminders =
     pendingHabitsToday.length > 0 ||
     activeTargets.length > 0 ||
     monthClosingStatus.isEndOfMonth;
+
+  const hasPendingReminders = showAgendaCardToday || hasOtherReminders;
 
   return (
     <div
@@ -275,7 +277,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
             </span>
           </div>
 
-          {!hasPendingReminders ? (
+          {!hasPendingReminders && !hasNoAgendaToday ? (
             <div
               className={`p-4 rounded-2xl border flex items-center gap-3 ${
                 isLight
@@ -288,8 +290,74 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
                 Semua agenda dan kebiasaan hari ini telah selesai dikerjakan. Pertahankan konsistensimu!
               </p>
             </div>
+          ) : !hasOtherReminders && hasNoAgendaToday ? (
+            <div className="w-full">
+              <button
+                type="button"
+                onClick={() => onNavigateToTab?.('agenda')}
+                className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                  isLight
+                    ? 'bg-white border-slate-200/90 hover:border-teal-400 text-slate-900 shadow-xs'
+                    : 'bg-[#111827] border-white/10 hover:border-teal-500/40 text-white'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                      isLight
+                        ? 'bg-slate-100 border-slate-200 text-slate-600'
+                        : 'bg-white/5 border-white/10 text-slate-300'
+                    }`}
+                  >
+                    <ListChecks className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold truncate">
+                      Anda belum punya agenda
+                    </p>
+                    <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Tambahkan agenda harian agar pengingat aktif muncul di sini.
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {hasNoAgendaToday && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTab?.('agenda')}
+                  className={`p-4 rounded-2xl border text-left transition-all flex items-start justify-between gap-3 cursor-pointer ${
+                    isLight
+                      ? 'bg-white border-slate-200/90 hover:border-teal-400 text-slate-900 shadow-xs'
+                      : 'bg-[#111827] border-white/10 hover:border-teal-500/40 text-white'
+                  }`}
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                        isLight
+                          ? 'bg-slate-100 border-slate-200 text-slate-600'
+                          : 'bg-white/5 border-white/10 text-slate-300'
+                      }`}
+                    >
+                      <ListChecks className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-bold truncate">
+                        Anda belum punya agenda
+                      </p>
+                      <p className={`text-[11px] mt-0.5 line-clamp-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                        Tambahkan agenda harian agar pengingat aktif muncul di sini.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 mt-1" />
+                </button>
+              )}
+
               {showAgendaCardToday && (() => {
                 const isAllAgendasCompleted = pendingTasksToday.length === 0;
                 return (
@@ -346,13 +414,6 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
                             >
                               Kamu sudah menyelesaikan agenda hari ini, tetap konsisten!
                             </p>
-                            <p
-                              className={`text-[11px] mt-1 leading-relaxed ${
-                                isLight ? 'text-emerald-800/85' : 'text-emerald-200/80'
-                              }`}
-                            >
-                              Seluruh {agendasToday.length} agenda hari ini selesai dikerjakan — hilang otomatis pukul 00.00 saat pergantian hari.
-                            </p>
                           </>
                         ) : (
                           <>
@@ -360,11 +421,6 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
                               {isPre22AgendaWindow
                                 ? `Selesaikan ${pendingTasksToday.length} Agenda Sebelum 22.00!`
                                 : `${agendasToday.length} Agenda Hari Ini`}
-                            </p>
-                            <p className={`text-[11px] mt-0.5 line-clamp-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                              {isPre22AgendaWindow
-                                ? `Peringatan malam (21.00–21.59): "${pendingTasksToday[0]?.title}" dan ${pendingTasksToday.length} agenda menunggu sebelum pukul 22.00.`
-                                : `Contoh: "${pendingTasksToday[0]?.title}" (${pendingTasksToday.length} belum selesai) — muncul mulai pukul 10.00 dan hilang otomatis pukul 00.00 saat pergantian hari.`}
                             </p>
                           </>
                         )}
